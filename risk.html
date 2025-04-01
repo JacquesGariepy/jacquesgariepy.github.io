@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D RISK - World Conquest Game (Improved)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/howler@2.2.3/dist/howler.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111827; color: white; font-family: sans-serif; }
+        canvas { display: block; }
+        #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; /* Allow clicks to pass through */ }
+        .ui-panel { background-color: rgba(0, 0, 0, 0.7); padding: 10px; margin: 10px; border-radius: 5px; pointer-events: auto; /* Re-enable events for UI */ }
+        #player-info { position: absolute; top: 10px; left: 10px; }
+        #game-phase { position: absolute; top: 10px; right: 10px; text-align: right; }
+        #territory-info { position: absolute; bottom: 50px; left: 10px; display: none; /* Initially hidden */ }
+        #action-buttons { position: absolute; bottom: 10px; right: 10px; }
+        button { background-color: #3b82f6; color: white; padding: 5px 10px; margin-left: 5px; border: none; border-radius: 3px; cursor: pointer; }
+        button:disabled { background-color: #6b7280; cursor: not-allowed; }
+        .player-color-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 5px; }
+        #dice-area { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); background-color: rgba(0, 0, 0, 0.7); padding: 10px; border-radius: 5px; display: none; /* Initially hidden */ }
+        .dice { display: inline-block; width: 30px; height: 30px; line-height: 30px; text-align: center; border: 1px solid white; margin: 2px; border-radius: 3px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="3d-container" style="position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;"></div>
+
+    <div id="ui-container">
+        <div id="player-info" class="ui-panel">
+            <h3 class="font-bold mb-2">Players</h3>
+            <div id="player-list"></div>
+        </div>
+
+        <div id="game-phase" class="ui-panel">
+            <h3 class="font-bold mb-1">Current Player: <span id="current-player-name"></span></h3>
+            <div>Phase: <span id="current-phase" class="font-semibold"></span></div>
+            <div>Armies to Place: <span id="armies-to-place" class="font-semibold">0</span></div>
+        </div>
+
+        <div id="territory-info" class="ui-panel">
+            <h4 class="font-bold">Territory: <span id="info-territory-name"></span></h4>
+            <div>Owner: <span id="info-territory-owner"></span></div>
+            <div>Armies: <span id="info-territory-armies"></span></div>
+        </div>
+
+        <div id="action-buttons" class="ui-panel">
+            <button id="btn-deploy" disabled>Deploy</button>
+            <button id="btn-attack" disabled>Attack</button>
+            <button id="btn-fortify" disabled>Fortify</button>
+            <button id="btn-end-phase" disabled>End Phase</button>
+            <button id="btn-end-turn" disabled>End Turn</button>
+        </div>
+
+         <div id="dice-area">
+             <div>Attacker: <span id="attacker-dice"></span></div>
+             <div>Defender: <span id="defender-dice"></span></div>
+             <div id="battle-result" class="mt-2 font-semibold"></div>
+         </div>
+    </div>
+
+    <div id="setup-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50">
+        <div class="bg-gray-800 p-8 rounded-lg text-white">
+            <h2 class="text-2xl mb-4">Setup Game</h2>
+            <label for="player-count" class="block mb-2">Number of Players:</label>
+            <select id="player-count" class="bg-gray-700 p-2 rounded mb-4 w-full">
+                <option value="2">2</option>
+                <option value="3" selected>3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+            </select>
+            <button id="start-game-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded w-full">
+                Start Game
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // =====================
+        // GAME STATE MANAGEMENT
+        // =====================
+        const gameState = {
+            players: [],
+            currentPlayerIndex: 0,
+            phase: 'setup', // setup, deploy, attack, fortify
+            selectedTerritoryId: null,
+            fromTerritoryId: null, // For attack/fortify moves
+            armiesToPlace: 0,
+            territories: {}, // Populated by TERRITORY_DATA
+            continentBonusData: {}, // Populated by CONTINENT_DATA
+            cards: [], // { type, territoryId } or { type: 'wild' }
+            diceResults: { attacker: [], defender: [] },
+            battleResult: null, // { attackerLosses, defenderLosses }
+            conqueredTerritoryThisTurn: false,
+
+            // 3D rendering state
+            scene: null,
+            camera: null,
+            renderer: null,
+            controls: null,
+            raycaster: new THREE.Raycaster(),
+            mouse: new THREE.Vector2(),
+            intersectedTerritoryMesh: null, // The THREE.Mesh currently hovered
+            selectedTerritoryMesh: null, // The THREE.Mesh selected
+            territoryMeshes: {}, // Map territoryId -> THREE.Mesh
+            territoryInfoObjects: {}, // Map territoryId -> { mesh, labelMesh }
+
+            // Audio
+            sounds: {
+                click: new Howl({ src: ['https://cdn.pixabay.com/audio/2021/08/04/audio_16cc99a50d.mp3'], volume: 0.5 }), // Example sound
+                dice: new Howl({ src: ['https://cdn.pixabay.com/audio/2022/03/15/audio_537356f757.mp3'], volume: 0.7 }), // Example sound
+                deploy: new Howl({ src: ['https://cdn.pixabay.com/audio/2022/03/10/audio_a71b4f6c53.mp3'], volume: 0.6 }), // Example sound
+                // battle: null, // Add more sounds
+                // victory: null
+            }
+        };
+
+        // ==================
+        // GAME DATA (MUST BE COMPLETE FOR REAL GAME)
+        // ==================
+        // FIX 3 & 4: Added more (still incomplete) data and proper structure.
+        // Coordinates are PLACEHOLDERS - they need to be calculated based on a map projection.
+        const TERRITORY_DATA = {
+            'alaska': { name: 'Alaska', continent: 'north-america', neighbors: ['northwest-territory', 'alberta', 'kamchatka'], pos: { x: -2.0, y: 1.5, z: 0 } },
+            'northwest-territory': { name: 'Northwest Territory', continent: 'north-america', neighbors: ['alaska', 'alberta', 'greenland', 'ontario'], pos: { x: -1.0, y: 1.8, z: 0 } },
+            'greenland': { name: 'Greenland', continent: 'north-america', neighbors: ['northwest-territory', 'ontario', 'quebec', 'iceland'], pos: { x: 0.5, y: 1.9, z: 0 } },
+            'alberta': { name: 'Alberta', continent: 'north-america', neighbors: ['alaska', 'northwest-territory', 'ontario', 'western-united-states'], pos: { x: -1.2, y: 1.2, z: 0 } },
+            'ontario': { name: 'Ontario', continent: 'north-america', neighbors: ['northwest-territory', 'greenland', 'alberta', 'quebec', 'western-united-states', 'eastern-united-states'], pos: { x: -0.5, y: 1.3, z: 0 } },
+            'quebec': { name: 'Quebec', continent: 'north-america', neighbors: ['greenland', 'ontario', 'eastern-united-states'], pos: { x: 0.2, y: 1.4, z: 0 } },
+            'western-united-states': { name: 'Western US', continent: 'north-america', neighbors: ['alberta', 'ontario', 'eastern-united-states', 'central-america'], pos: { x: -1.0, y: 0.8, z: 0 } },
+            'eastern-united-states': { name: 'Eastern US', continent: 'north-america', neighbors: ['ontario', 'quebec', 'western-united-states', 'central-america'], pos: { x: -0.2, y: 0.9, z: 0 } },
+            'central-america': { name: 'Central America', continent: 'north-america', neighbors: ['western-united-states', 'eastern-united-states', 'venezuela'], pos: { x: -0.7, y: 0.3, z: 0 } },
+            // --- South America ---
+            'venezuela': { name: 'Venezuela', continent: 'south-america', neighbors: ['central-america', 'peru', 'brazil'], pos: { x: -0.5, y: -0.2, z: 0 } },
+            'peru': { name: 'Peru', continent: 'south-america', neighbors: ['venezuela', 'brazil', 'argentina'], pos: { x: -0.8, y: -0.7, z: 0 } },
+            'brazil': { name: 'Brazil', continent: 'south-america', neighbors: ['venezuela', 'peru', 'argentina', 'north-africa'], pos: { x: 0.0, y: -0.5, z: 0 } },
+            'argentina': { name: 'Argentina', continent: 'south-america', neighbors: ['peru', 'brazil'], pos: { x: -0.6, y: -1.2, z: 0 } },
+             // --- Europe ---
+            'iceland': { name: 'Iceland', continent: 'europe', neighbors: ['greenland', 'great-britain', 'scandinavia'], pos: { x: 1.0, y: 1.5, z: 0 } },
+            'great-britain': { name: 'Great Britain', continent: 'europe', neighbors: ['iceland', 'scandinavia', 'northern-europe', 'western-europe'], pos: { x: 1.5, y: 1.0, z: 0 } },
+            // ... MANY MORE TERRITORIES NEEDED ...
+             'kamchatka': { name: 'Kamchatka', continent: 'asia', neighbors: ['alaska', 'yakutsk', 'irkutsk', 'mongolia', 'japan'], pos: { x: -2.0, y: 1.8, z: 1.5 } }, // Placeholder pos
+             'yakutsk': { name: 'Yakutsk', continent: 'asia', neighbors: ['kamchatka', 'siberia', 'irkutsk'], pos: { x: -1.5, y: 2.0, z: 1.8 } },
+             'irkutsk': { name: 'Irkutsk', continent: 'asia', neighbors: ['kamchatka', 'yakutsk', 'siberia', 'mongolia'], pos: { x: -1.2, y: 1.5, z: 1.9 } },
+             'siberia': { name: 'Siberia', continent: 'asia', neighbors: ['yakutsk', 'irkutsk', 'mongolia', 'china', 'ural'], pos: { x: -0.8, y: 1.8, z: 2.0 } },
+             'ural': { name: 'Ural', continent: 'asia', neighbors: ['siberia', 'china', 'afghanistan', 'ukraine'], pos: { x: 0.0, y: 1.5, z: 1.5 } },
+             'mongolia': { name: 'Mongolia', continent: 'asia', neighbors: ['kamchatka', 'irkutsk', 'siberia', 'china', 'japan'], pos: { x: -1.0, y: 1.0, z: 2.0 } },
+             'japan': { name: 'Japan', continent: 'asia', neighbors: ['kamchatka', 'mongolia'], pos: { x: -1.5, y: 0.8, z: 2.5 } },
+             'china': { name: 'China', continent: 'asia', neighbors: ['siberia', 'ural', 'afghanistan', 'india', 'siam', 'mongolia'], pos: { x: -0.5, y: 0.8, z: 2.2 } },
+             'afghanistan': { name: 'Afghanistan', continent: 'asia', neighbors: ['ural', 'china', 'india', 'middle-east', 'ukraine'], pos: { x: 0.5, y: 0.8, z: 1.8 } },
+             'middle-east': { name: 'Middle East', continent: 'asia', neighbors: ['afghanistan', 'india', 'egypt', 'east-africa', 'southern-europe', 'ukraine'], pos: { x: 1.0, y: 0.2, z: 1.5 } },
+             'india': { name: 'India', continent: 'asia', neighbors: ['china', 'afghanistan', 'middle-east', 'siam'], pos: { x: 0.2, y: 0.0, z: 2.0 } },
+             'siam': { name: 'Siam', continent: 'asia', neighbors: ['china', 'india', 'indonesia'], pos: { x: -0.2, y: -0.5, z: 2.5 } },
+             // --- Africa ---
+             'north-africa': { name: 'North Africa', continent: 'africa', neighbors: ['brazil', 'western-europe', 'southern-europe', 'egypt', 'east-africa', 'congo'], pos: { x: 1.0, y: -0.5, z: 0.5 } },
+             'egypt': { name: 'Egypt', continent: 'africa', neighbors: ['north-africa', 'east-africa', 'middle-east', 'southern-europe'], pos: { x: 1.5, y: 0.0, z: 1.0 } },
+             'east-africa': { name: 'East Africa', continent: 'africa', neighbors: ['north-africa', 'egypt', 'congo', 'south-africa', 'madagascar', 'middle-east'], pos: { x: 1.8, y: -0.8, z: 1.2 } },
+             'congo': { name: 'Congo', continent: 'africa', neighbors: ['north-africa', 'east-africa', 'south-africa'], pos: { x: 1.5, y: -1.2, z: 0.8 } },
+             'south-africa': { name: 'South Africa', continent: 'africa', neighbors: ['congo', 'east-africa', 'madagascar'], pos: { x: 1.7, y: -1.8, z: 1.0 } },
+             'madagascar': { name: 'Madagascar', continent: 'africa', neighbors: ['east-africa', 'south-africa'], pos: { x: 2.2, y: -1.5, z: 1.5 } },
+             // --- Australia ---
+            'indonesia': { name: 'Indonesia', continent: 'australia', neighbors: ['siam', 'new-guinea', 'western-australia'], pos: { x: 0.5, y: -1.0, z: 2.8 } },
+            'new-guinea': { name: 'New Guinea', continent: 'australia', neighbors: ['indonesia', 'eastern-australia', 'western-australia'], pos: { x: 1.0, y: -1.2, z: 3.0 } },
+            'western-australia': { name: 'Western Australia', continent: 'australia', neighbors: ['indonesia', 'new-guinea', 'eastern-australia'], pos: { x: 0.8, y: -1.8, z: 2.8 } },
+            'eastern-australia': { name: 'Eastern Australia', continent: 'australia', neighbors: ['new-guinea', 'western-australia'], pos: { x: 1.3, y: -1.6, z: 3.0 } },
+             // --- Added for connectivity ---
+            'ukraine': { name: 'Ukraine', continent: 'europe', neighbors: ['ural', 'afghanistan', 'middle-east', 'southern-europe', 'northern-europe', 'scandinavia'], pos: { x: 1.8, y: 1.0, z: 1.0 } }, // Added
+            'scandinavia': { name: 'Scandinavia', continent: 'europe', neighbors: ['iceland', 'great-britain', 'northern-europe', 'ukraine'], pos: { x: 1.8, y: 1.5, z: 0.5 } }, // Added
+            'northern-europe': { name: 'Northern Europe', continent: 'europe', neighbors: ['great-britain', 'scandinavia', 'ukraine', 'southern-europe', 'western-europe'], pos: { x: 2.0, y: 0.8, z: 0.5 } }, // Added
+            'southern-europe': { name: 'Southern Europe', continent: 'europe', neighbors: ['western-europe', 'northern-europe', 'ukraine', 'middle-east', 'egypt', 'north-africa'], pos: { x: 2.2, y: 0.2, z: 0.8 } }, // Added
+            'western-europe': { name: 'Western Europe', continent: 'europe', neighbors: ['great-britain', 'northern-europe', 'southern-europe', 'north-africa'], pos: { x: 1.8, y: 0.5, z: 0.0 } }, // Added
+        };
+
+        const CONTINENT_DATA = {
+            'north-america': { name: 'North America', bonus: 5, territories: ['alaska', 'northwest-territory', 'greenland', 'alberta', 'ontario', 'quebec', 'western-united-states', 'eastern-united-states', 'central-america'] },
+            'south-america': { name: 'South America', bonus: 2, territories: ['venezuela', 'peru', 'brazil', 'argentina'] },
+             'europe': { name: 'Europe', bonus: 5, territories: ['iceland', 'great-britain', 'scandinavia', 'ukraine', 'northern-europe', 'southern-europe', 'western-europe'] }, // Added
+             'africa': { name: 'Africa', bonus: 3, territories: ['north-africa', 'egypt', 'east-africa', 'congo', 'south-africa', 'madagascar'] }, // Added
+             'asia': { name: 'Asia', bonus: 7, territories: ['kamchatka', 'yakutsk', 'irkutsk', 'siberia', 'ural', 'mongolia', 'japan', 'china', 'afghanistan', 'middle-east', 'india', 'siam'] }, // Added
+             'australia': { name: 'Australia', bonus: 2, territories: ['indonesia', 'new-guinea', 'western-australia', 'eastern-australia'] }, // Added
+        };
+
+        const CARD_TYPES = ['infantry', 'cavalry', 'artillery']; // Simplified, no wild for now
+        const PLAYER_COLORS = [ 0x3b82f6, 0xef4444, 0x10b981, 0xf59e0b, 0x8b5cf6, 0xec4899 ]; // hex values
+        const PLAYER_COLOR_CLASSES = [ 'bg-blue-500', 'bg-red-500', 'bg-green-500', 'bg-yellow-500', 'bg-purple-500', 'bg-pink-500' ];
+        const PLAYER_NAMES = ['Admiral Ackbar', 'General Grievous', 'Commander Cody', 'Captain Rex', 'Darth Vader', 'Emperor Palpatine']; // Fun names
+
+        // DOM Elements
+        let uiContainer, playerInfoDiv, gamePhaseDiv, territoryInfoDiv, actionButtonsDiv, diceAreaDiv;
+        let currentPlayerNameSpan, currentPhaseSpan, armiesToPlaceSpan, infoTerritoryNameSpan, infoTerritoryOwnerSpan, infoTerritoryArmiesSpan;
+        let btnDeploy, btnAttack, btnFortify, btnEndPhase, btnEndTurn, attackerDiceSpan, defenderDiceSpan, battleResultDiv;
+        let setupModal, startGameBtn, playerCountSelect;
+        let threeContainer;
+
+
+        // ================
+        // INITIALIZATION
+        // ================
+        function initializeGame(selectedPlayers) {
+            console.log(`Initializing game for ${selectedPlayers} players.`);
+            gameState.players = Array.from({ length: selectedPlayers }, (_, i) => ({
+                id: i + 1,
+                name: PLAYER_NAMES[i % PLAYER_NAMES.length], // Use fun names
+                color: PLAYER_COLORS[i],
+                colorClass: PLAYER_COLOR_CLASSES[i],
+                territories: new Set(),
+                cards: [],
+                // armies: 0, // Armies count is derived from territories initially + reinforcements
+                isEliminated: false,
+                // mission: null // Missions not implemented here
+            }));
+
+            // Initialize territories from data
+            gameState.territories = {};
+            for (const [id, data] of Object.entries(TERRITORY_DATA)) {
+                gameState.territories[id] = {
+                    id: id,
+                    name: data.name,
+                    continent: data.continent,
+                    neighbors: new Set(data.neighbors), // Use Sets for efficient lookup
+                    pos: data.pos, // Store position data
+                    owner: null,
+                    armies: 0,
+                };
+            }
+            // Populate continent data
+            gameState.continentBonusData = CONTINENT_DATA;
+
+
+            // Distribute territories randomly and fairly
+            const territoryIds = Object.keys(gameState.territories);
+            shuffleArray(territoryIds); // Randomize territory order
+
+            territoryIds.forEach((territoryId, i) => {
+                const playerIndex = i % selectedPlayers;
+                const player = gameState.players[playerIndex];
+                const territory = gameState.territories[territoryId];
+
+                territory.owner = player.id;
+                territory.armies = 1;
+                player.territories.add(territoryId);
+            });
+
+            // Calculate initial armies to place (after territory distribution)
+            const initialArmiesPerPlayer = { 2: 40, 3: 35, 4: 30, 5: 25, 6: 20 }[selectedPlayers] || 35;
+            gameState.players.forEach(player => {
+                // Subtract armies already placed (1 per territory)
+                const armiesToPlaceInitially = initialArmiesPerPlayer - player.territories.size;
+                player.armiesToPlace = armiesToPlaceInitially; // Store this for initial deployment phase
+                 console.log(`${player.name} has ${armiesToPlaceInitially} armies to place initially.`);
+            });
+
+
+            initializeRiskCards(); // Now defined
+
+            gameState.currentPlayerIndex = 0;
+             // Start with an initial deployment phase before the first real turn
+            gameState.phase = 'initial_deploy';
+            gameState.armiesToPlace = getCurrentPlayer().armiesToPlace; // Use the pre-calculated value
+
+            // Only initialize 3D board *after* setting up game state
+            initialize3DBoard();
+
+            // gameState.sounds.victory.play(); // Add a start sound later
+            setupModal.classList.add('hidden');
+            uiContainer.style.display = 'block'; // Show UI
+
+            updateUI();
+        }
+
+        function initializeRiskCards() {
+            // FIX 1 & 3: Implement card initialization
+            gameState.cards = [];
+            const territoryIds = Object.keys(gameState.territories);
+            shuffleArray(territoryIds);
+            let typeIndex = 0;
+            territoryIds.forEach(tId => {
+                gameState.cards.push({
+                    type: CARD_TYPES[typeIndex % CARD_TYPES.length],
+                    territoryId: tId
+                });
+                typeIndex++;
+            });
+            // Add wild cards? (Not implemented here)
+            shuffleArray(gameState.cards);
+            console.log(`Initialized ${gameState.cards.length} risk cards.`);
+        }
+
+
+        // =============
+        // 3D RENDERING
+        // =============
+        function initialize3DBoard() {
+            threeContainer = document.getElementById('3d-container');
+            if (!threeContainer) {
+                console.error("3D container not found!");
+                return;
+            }
+
+            // Scene
+            gameState.scene = new THREE.Scene();
+            gameState.scene.background = new THREE.Color(0x111827); // Match body background
+
+            // Camera
+            gameState.camera = new THREE.PerspectiveCamera(
+                60, // Slightly less wide FOV
+                threeContainer.clientWidth / threeContainer.clientHeight,
+                0.1,
+                1000
+            );
+            gameState.camera.position.set(0, 0, 5); // Start further back
+
+            // Renderer
+            gameState.renderer = new THREE.WebGLRenderer({ antialias: true });
+            gameState.renderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight);
+            threeContainer.appendChild(gameState.renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); // Brighter ambient
+            gameState.scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 10, 7);
+            gameState.scene.add(directionalLight);
+
+            // Controls
+            gameState.controls = new THREE.OrbitControls(gameState.camera, gameState.renderer.domElement);
+            gameState.controls.enableDamping = true;
+            gameState.controls.dampingFactor = 0.1;
+            gameState.controls.minDistance = 2;
+            gameState.controls.maxDistance = 15;
+            gameState.controls.target.set(0, 0, 0); // Ensure controls orbit the center
+
+            // Create territory meshes based on actual data
+            // FIX 2: Use defined positions and store meshes correctly
+            gameState.territoryMeshes = {};
+             gameState.territoryInfoObjects = {};
+            const territoryMaterial = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 10 }); // Use vertex colors
+
+            for (const territoryId in gameState.territories) {
+                const territory = gameState.territories[territoryId];
+                if (!territory.pos) {
+                    console.warn(`Territory ${territoryId} missing position data.`);
+                    continue;
+                }
+
+                const player = getPlayerById(territory.owner);
+                const color = player ? new THREE.Color(player.color) : new THREE.Color(0x888888); // Default gray if unowned (shouldn't happen after init)
+
+                // Simple sphere geometry for now
+                const geometry = new THREE.SphereGeometry(0.08, 16, 16); // Smaller spheres
+                 // Assign color to geometry vertices
+                const colors = [];
+                for (let i = 0; i < geometry.attributes.position.count; i++) {
+                    colors.push(color.r, color.g, color.b);
+                }
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+
+                const mesh = new THREE.Mesh(geometry, territoryMaterial.clone()); // Clone material for potential individual changes later
+                mesh.position.set(territory.pos.x, territory.pos.y, territory.pos.z);
+                mesh.userData = { territoryId: territoryId, type: 'territory' }; // Add type for raycasting
+
+                gameState.scene.add(mesh);
+                gameState.territoryMeshes[territoryId] = mesh;
+
+                // FIX 2: Add simple text label (using Sprites for better performance and no font loading)
+                const labelMesh = createTextSprite(territory.armies.toString(), { fontsize: 18, fontface: "Arial", textColor: { r: 255, g: 255, b: 255, a: 1.0 } });
+                labelMesh.position.set(territory.pos.x, territory.pos.y + 0.15, territory.pos.z); // Position above sphere
+                gameState.scene.add(labelMesh);
+
+                 gameState.territoryInfoObjects[territoryId] = { mesh: mesh, labelMesh: labelMesh };
+            }
+
+             // Helper lines for neighbours (optional, can be performance heavy)
+             // drawNeighborLines();
+
+            // Start animation loop
+            animate();
+
+            // Add event listeners
+            window.addEventListener('resize', handleResize);
+            threeContainer.addEventListener('mousemove', handleMouseMove); // Use mousemove for hover
+            threeContainer.addEventListener('click', handleTerritoryClick); // Use click for selection
+        }
+
+        function drawNeighborLines() {
+            const material = new THREE.LineBasicMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.2 });
+            for (const tId in gameState.territories) {
+                const t = gameState.territories[tId];
+                const startPos = gameState.territoryMeshes[tId]?.position;
+                if (!startPos) continue;
+
+                t.neighbors.forEach(nId => {
+                     // Avoid drawing lines twice (e.g., A->B and B->A) by only drawing if tId < nId alphabetically
+                     if (tId < nId) {
+                        const endPos = gameState.territoryMeshes[nId]?.position;
+                        if (endPos) {
+                             const points = [startPos, endPos];
+                             const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                             const line = new THREE.Line(geometry, material);
+                             gameState.scene.add(line);
+                        }
+                     }
+                });
+            }
+        }
+
+         // FIX 2: Text Sprite function
+         function createTextSprite(message, parameters) {
+             const fontface = parameters.fontface || "Arial";
+             const fontsize = parameters.fontsize || 18;
+             const textColor = parameters.textColor || { r: 255, g: 255, b: 255, a: 1.0 };
+
+             const canvas = document.createElement('canvas');
+             const context = canvas.getContext('2d');
+             context.font = "Bold " + fontsize + "px " + fontface;
+
+             // Measure text width
+             const metrics = context.measureText(message);
+             const textWidth = metrics.width;
+
+             // Set canvas size based on text
+             canvas.width = textWidth + 10; // Add some padding
+             canvas.height = fontsize + 10; // Add some padding
+             context.font = "Bold " + fontsize + "px " + fontface; // Re-set font after resize
+             context.fillStyle = `rgba(${textColor.r}, ${textColor.g}, ${textColor.b}, ${textColor.a})`;
+             context.textAlign = 'center';
+             context.textBaseline = 'middle';
+             context.fillText(message, canvas.width / 2, canvas.height / 2);
+
+
+             const texture = new THREE.CanvasTexture(canvas);
+             texture.needsUpdate = true;
+
+             const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+             const sprite = new THREE.Sprite(spriteMaterial);
+
+             // Scale sprite to reasonable size in 3D space
+             sprite.scale.set(0.5 * (canvas.width / canvas.height), 0.5, 1);
+
+             return sprite;
+         }
+
+        // Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+            gameState.controls.update(); // Required if enableDamping is true
+            gameState.renderer.render(gameState.scene, gameState.camera);
+        }
+
+        // ===================
+        // GAME LOGIC FUNCTIONS
+        // ===================
+        function getCurrentPlayer() {
+            return gameState.players[gameState.currentPlayerIndex];
+        }
+
+        function getPlayerById(playerId) {
+            return gameState.players.find(p => p.id === playerId);
+        }
+
+        function nextPlayer() {
+             gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
+             // Skip eliminated players
+            while (getCurrentPlayer().isEliminated) {
+                 gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
+             }
+        }
+
+        function startTurn() {
+             const player = getCurrentPlayer();
+             console.log(`Starting turn for ${player.name}`);
+             gameState.phase = 'deploy';
+             gameState.armiesToPlace = calculateReinforcements(player);
+             gameState.selectedTerritoryId = null;
+             gameState.fromTerritoryId = null;
+             gameState.battleResult = null;
+             gameState.conqueredTerritoryThisTurn = false;
+             updateUI();
+         }
+
+
+        function endTurn() {
+            console.log(`Ending turn for ${getCurrentPlayer().name}`);
+             // FIX 1: Basic card drawing logic
+             if (gameState.conqueredTerritoryThisTurn && gameState.cards.length > 0) {
+                 const drawnCard = gameState.cards.pop();
+                 getCurrentPlayer().cards.push(drawnCard);
+                 console.log(`${getCurrentPlayer().name} drew a ${drawnCard.type} card.`);
+                 // TODO: Update UI to show cards
+             }
+
+            // TODO: Check for win condition (e.g., player controls all territories)
+
+            nextPlayer();
+            startTurn(); // Start the next player's turn
+        }
+
+         function advancePhase() {
+             const player = getCurrentPlayer();
+             switch (gameState.phase) {
+                 case 'deploy':
+                     if (gameState.armiesToPlace > 0) {
+                         alert("You must deploy all your reinforcements first!");
+                         return;
+                     }
+                     gameState.phase = 'attack';
+                     console.log(`${player.name} enters Attack phase.`);
+                     break;
+                 case 'attack':
+                     gameState.phase = 'fortify';
+                     console.log(`${player.name} enters Fortify phase.`);
+                     break;
+                 case 'fortify':
+                     // Fortify phase ends automatically after one move or skipping
+                     endTurn();
+                     return; // endTurn handles starting the next turn/UI update
+                 case 'initial_deploy':
+                     // Logic for advancing during initial deployment
+                      if (gameState.armiesToPlace > 0) {
+                         alert("You must deploy all your initial armies!");
+                         return;
+                     }
+                      // Check if all players have placed initial armies
+                     let allPlaced = gameState.players.every(p => p.armiesToPlace === 0);
+                     if (allPlaced) {
+                         console.log("Initial deployment complete. Starting first turn.");
+                         startTurn(); // Start the actual first turn
+                     } else {
+                         // Move to next player for initial deployment
+                         nextPlayer();
+                         gameState.armiesToPlace = getCurrentPlayer().armiesToPlace;
+                         console.log(`Next player (${getCurrentPlayer().name}) to deploy initial ${gameState.armiesToPlace} armies.`);
+                     }
+                     break;
+             }
+             gameState.selectedTerritoryId = null; // Reset selections on phase change
+             gameState.fromTerritoryId = null;
+             updateUI();
+         }
+
+
+        function calculateReinforcements(player) {
+            // 1. Base armies based on territories (min 3)
+            let armies = Math.max(3, Math.floor(player.territories.size / 3));
+
+            // 2. Add continent bonuses
+             // FIX 3: Use the populated continent data
+            for (const continentId in gameState.continentBonusData) {
+                const continent = gameState.continentBonusData[continentId];
+                const ownsContinent = continent.territories.every(tId => player.territories.has(tId));
+                if (ownsContinent) {
+                    console.log(`${player.name} gets bonus for ${continent.name}: +${continent.bonus}`);
+                    armies += continent.bonus;
+                }
+            }
+
+            // 3. Add card trade bonuses (if player chooses to trade)
+            // TODO: Implement card trading logic here or called from UI action
+            // armies += calculateCardTradeBonus(player);
+
+            console.log(`${player.name} receives ${armies} reinforcements.`);
+            return armies;
+        }
+
+         // Placeholder function - needs real implementation
+         function performAttack(attackerId, defenderId, attackerDiceCount) {
+             console.log(`ATTACK: ${attackerId} (${attackerDiceCount} dice) -> ${defenderId}`);
+             gameState.sounds.dice.play(); // Play dice sound
+
+              const attackerTerritory = gameState.territories[attackerId];
+              const defenderTerritory = gameState.territories[defenderId];
+              const attacker = getPlayerById(attackerTerritory.owner);
+              const defender = getPlayerById(defenderTerritory.owner);
+
+              // Validate attack
+              if (!attackerTerritory || !defenderTerritory || !attacker || !defender || attacker.id === defender.id) return;
+              if (attackerTerritory.armies <= 1) return; // Cannot attack with 1 army
+              if (!attackerTerritory.neighbors.has(defenderId)) return; // Must be neighbours
+
+              const maxAttackerDice = Math.min(3, attackerTerritory.armies - 1);
+              const actualAttackerDice = Math.min(attackerDiceCount, maxAttackerDice); // Ensure valid dice count
+               const defenderDiceCount = Math.min(2, defenderTerritory.armies); // Max 2 dice for defender
+
+               // Roll dice
+               gameState.diceResults.attacker = rollDice(actualAttackerDice);
+               gameState.diceResults.defender = rollDice(defenderDiceCount);
+               gameState.diceResults.attacker.sort((a, b) => b - a); // Sort highest first
+               gameState.diceResults.defender.sort((a, b) => b - a);
+
+               console.log(`  Rolls - Attacker: ${gameState.diceResults.attacker}, Defender: ${gameState.diceResults.defender}`);
+
+                // Compare dice
+                let attackerLosses = 0;
+                let defenderLosses = 0;
+                const comparisons = Math.min(actualAttackerDice, defenderDiceCount);
+                for (let i = 0; i < comparisons; i++) {
+                    if (gameState.diceResults.attacker[i] > gameState.diceResults.defender[i]) {
+                        defenderLosses++;
+                    } else {
+                        attackerLosses++;
+                    }
+                }
+
+               console.log(`  Result - Attacker loses ${attackerLosses}, Defender loses ${defenderLosses}`);
+                gameState.battleResult = { attackerLosses, defenderLosses };
+
+               // Apply losses
+               attackerTerritory.armies -= attackerLosses;
+               defenderTerritory.armies -= defenderLosses;
+
+                // Check for conquest
+                if (defenderTerritory.armies <= 0) {
+                    console.log(`  CONQUEST! ${attacker.name} captured ${defenderTerritory.name} from ${defender.name}.`);
+                    defender.territories.delete(defenderId);
+                    attacker.territories.add(defenderId);
+                    defenderTerritory.owner = attacker.id;
+                    gameState.conqueredTerritoryThisTurn = true;
+
+                    // Force attacker to move armies (at least number of dice used, max all but one)
+                    const armiesToMove = Math.max(actualAttackerDice, 1); // Must move at least 1 or dice count
+                    attackerTerritory.armies -= armiesToMove;
+                    defenderTerritory.armies = armiesToMove; // Occupy with moved armies
+                     console.log(`  Moved ${armiesToMove} armies into ${defenderTerritory.name}.`);
+
+                    // TODO: Check if defender is eliminated
+                    // TODO: Allow attacker to move more armies (up to attackerTerritory.armies - 1)
+
+                     // Update defender territory color
+                     updateTerritoryVisuals(defenderId);
+
+                    // Deselect target after conquest
+                    gameState.selectedTerritoryId = null;
+                }
+
+                 // Update army counts visually
+                 updateTerritoryVisuals(attackerId);
+                 updateTerritoryVisuals(defenderId);
+                 updateUI(); // Update dice display, player info potentially
+         }
+
+         // Placeholder function
+         function performFortify(fromId, toId, numArmies) {
+            // TODO: Implement fortify logic (move armies between connected territories owned by player)
+             console.log(`FORTIFY: ${numArmies} from ${fromId} to ${toId}`);
+             const fromTerritory = gameState.territories[fromId];
+            const toTerritory = gameState.territories[toId];
+
+            if (!fromTerritory || !toTerritory || fromTerritory.owner !== toTerritory.owner || fromTerritory.owner !== getCurrentPlayer().id) return;
+            if (fromTerritory.armies <= numArmies || numArmies < 1) return; // Cant move all or none
+            // TODO: Add check for connected path between fromId and toId through player's territories
+
+             fromTerritory.armies -= numArmies;
+             toTerritory.armies += numArmies;
+
+             gameState.sounds.deploy.play(); // Re-use deploy sound
+             updateTerritoryVisuals(fromId);
+             updateTerritoryVisuals(toId);
+
+             // Fortify phase ends after one move
+             console.log("Fortification complete. Ending turn.");
+             endTurn();
+         }
+
+        // Helper to roll dice
+        function rollDice(numDice) {
+            const results = [];
+            for (let i = 0; i < numDice; i++) {
+                results.push(Math.floor(Math.random() * 6) + 1);
+            }
+            return results;
+        }
+
+
+        // ===========
+        // UI UPDATES
+        // ===========
+        // FIX 1 & 4: Implement UI Update functions
+        function updateUI() {
+            updatePlayerDisplay();
+            updateGamePhaseUI();
+            updateActionButtons();
+             updateTerritoryHighlights(); // Clear previous highlights if needed
+             updateDiceUI(); // Update dice display
+             // No territory selected initially, hide info panel
+             if (!gameState.selectedTerritoryId) {
+                 territoryInfoDiv.style.display = 'none';
+             }
+        }
+
+        function updatePlayerDisplay() {
+            const playerList = gameState.players.map(p => {
+                const territoriesCount = p.isEliminated ? 'ELIMINATED' : `${p.territories.size} territories`;
+                const armiesCount = p.isEliminated ? '' : `(${calculateTotalArmies(p)} armies)`; // Helper needed
+                 const cardsCount = p.isEliminated ? '' : `- ${p.cards.length} cards`;
+                const activeClass = p.id === getCurrentPlayer().id ? 'font-bold ring-2 ring-white rounded px-1' : '';
+                const eliminatedClass = p.isEliminated ? 'opacity-50 italic' : '';
+                return `<div class="${activeClass} ${eliminatedClass} mb-1">
+                            <span class="player-color-dot ${p.colorClass}" style="background-color: #${p.color.toString(16).padStart(6, '0')};"></span>
+                            ${p.name}: ${territoriesCount} ${armiesCount} ${cardsCount}
+                        </div>`;
+            }).join('');
+            playerListDiv.innerHTML = playerList;
+        }
+
+        function calculateTotalArmies(player) {
+            let total = 0;
+            player.territories.forEach(tId => {
+                total += gameState.territories[tId].armies;
+            });
+            return total;
+        }
+
+
+        function updateGamePhaseUI() {
+            const player = getCurrentPlayer();
+            currentPlayerNameSpan.textContent = player.name;
+            currentPhaseSpan.textContent = gameState.phase.replace('_', ' ').toUpperCase();
+            armiesToPlaceSpan.textContent = gameState.armiesToPlace;
+        }
+
+        function updateActionButtons() {
+             const phase = gameState.phase;
+             const player = getCurrentPlayer();
+             const canDeploy = phase === 'deploy' || phase === 'initial_deploy';
+             const canAttack = phase === 'attack';
+             const canFortify = phase === 'fortify';
+             const canEndPhase = (phase === 'deploy' && gameState.armiesToPlace === 0) || phase === 'attack';
+             const canEndTurn = phase === 'fortify'; // Can always end turn in fortify phase (skip move)
+
+             // Enable/disable based on phase AND selections
+            btnDeploy.disabled = !(canDeploy && gameState.selectedTerritoryId && gameState.territories[gameState.selectedTerritoryId]?.owner === player.id && gameState.armiesToPlace > 0);
+             // Basic attack enabling - needs from and to selected
+            btnAttack.disabled = !(canAttack && gameState.fromTerritoryId && gameState.selectedTerritoryId && gameState.territories[gameState.selectedTerritoryId]?.owner !== player.id);
+            // Basic fortify enabling
+            btnFortify.disabled = !(canFortify && gameState.fromTerritoryId && gameState.selectedTerritoryId && gameState.territories[gameState.selectedTerritoryId]?.owner === player.id);
+
+
+             btnEndPhase.disabled = !canEndPhase;
+             btnEndTurn.disabled = !canEndTurn;
+
+             // Add listeners (ensure only added once or remove previous)
+            btnDeploy.onclick = () => handleDeployClick();
+            btnAttack.onclick = () => handleAttackClick();
+            btnFortify.onclick = () => handleFortifyClick();
+            btnEndPhase.onclick = () => advancePhase();
+            btnEndTurn.onclick = () => endTurn();
+        }
+
+         function updateTerritoryHighlights() {
+             // Reset previous selection/hover effects visually if needed
+             // For simplicity, we rely on the hover/click handlers to manage this now.
+         }
+
+        function updateTerritoryVisuals(territoryId) {
+             const territory = gameState.territories[territoryId];
+             const info = gameState.territoryInfoObjects[territoryId];
+             if (!territory || !info) return;
+
+             // Update Color
+             const player = getPlayerById(territory.owner);
+             const color = player ? new THREE.Color(player.color) : new THREE.Color(0x888888);
+             // Update geometry colors (more complex but efficient)
+            const colors = info.mesh.geometry.attributes.color;
+            for (let i = 0; i < colors.count; i++) {
+                colors.setXYZ(i, color.r, color.g, color.b);
+            }
+            colors.needsUpdate = true;
+
+
+             // Update Army Count Label
+             gameState.scene.remove(info.labelMesh); // Remove old label
+             info.labelMesh = createTextSprite(territory.armies.toString(), { fontsize: 18 });
+             info.labelMesh.position.copy(info.mesh.position).y += 0.15; // Position above sphere
+             gameState.scene.add(info.labelMesh);
+         }
+
+        function displayTerritoryInfo(territoryId) {
+             const territory = gameState.territories[territoryId];
+             if (!territory) {
+                 territoryInfoDiv.style.display = 'none';
+                 return;
+             }
+             const owner = getPlayerById(territory.owner);
+
+             infoTerritoryNameSpan.textContent = territory.name;
+             infoTerritoryOwnerSpan.textContent = owner ? owner.name : 'Unowned';
+             infoTerritoryOwnerSpan.style.color = owner ? `#${owner.color.toString(16).padStart(6, '0')}` : '#aaaaaa';
+             infoTerritoryArmiesSpan.textContent = territory.armies;
+
+             territoryInfoDiv.style.display = 'block';
+         }
+
+        function updateDiceUI() {
+             if (gameState.battleResult) {
+                 attackerDiceSpan.innerHTML = gameState.diceResults.attacker.map(d => `<span class="dice">${d}</span>`).join('');
+                 defenderDiceSpan.innerHTML = gameState.diceResults.defender.map(d => `<span class="dice">${d}</span>`).join('');
+                 battleResultDiv.textContent = `Attacker loses ${gameState.battleResult.attackerLosses}, Defender loses ${gameState.battleResult.defenderLosses}`;
+                 diceAreaDiv.style.display = 'block';
+             } else {
+                 diceAreaDiv.style.display = 'none';
+             }
+         }
+
+        // ===============
+        // EVENT HANDLERS
+        // ===============
+        // FIX 1 & 4: Implement event handlers with Raycasting
+        function handleMouseMove(event) {
+            event.preventDefault();
+
+            // Calculate mouse position in normalized device coordinates (-1 to +1)
+            const rect = threeContainer.getBoundingClientRect();
+            gameState.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            gameState.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            // Update the picking ray with the camera and mouse position
+            gameState.raycaster.setFromCamera(gameState.mouse, gameState.camera);
+
+            // Calculate objects intersecting the picking ray
+            const intersects = gameState.raycaster.intersectObjects(gameState.scene.children);
+
+            let newHoveredMesh = null;
+            for (let i = 0; i < intersects.length; i++) {
+                 // Find the first mesh that is a territory
+                if (intersects[i].object.userData.type === 'territory') {
+                     newHoveredMesh = intersects[i].object;
+                    break;
+                }
+            }
+
+             // FIX 2: Proper hover effect management
+            if (gameState.intersectedTerritoryMesh !== newHoveredMesh) {
+                // Reset previous hover effect (if any)
+                if (gameState.intersectedTerritoryMesh) {
+                    // Don't reset if it's the currently selected mesh
+                    if (gameState.intersectedTerritoryMesh !== gameState.selectedTerritoryMesh) {
+                       gameState.intersectedTerritoryMesh.scale.set(1, 1, 1);
+                       // Reset material property if changed, e.g., emissiveIntensity
+                    }
+                 }
+
+                gameState.intersectedTerritoryMesh = newHoveredMesh;
+
+                // Apply new hover effect
+                if (gameState.intersectedTerritoryMesh) {
+                     // Don't scale if it's the selected one (already scaled)
+                     if (gameState.intersectedTerritoryMesh !== gameState.selectedTerritoryMesh) {
+                        gameState.intersectedTerritoryMesh.scale.set(1.3, 1.3, 1.3);
+                        // Add other hover effects like changing emissive
+                     }
+                     // Display info for the hovered territory
+                     displayTerritoryInfo(gameState.intersectedTerritoryMesh.userData.territoryId);
+                 } else {
+                     // If not hovering over anything, hide the info panel unless a territory is selected
+                     if (!gameState.selectedTerritoryId) {
+                        territoryInfoDiv.style.display = 'none';
+                     } else {
+                         // Keep showing info for the selected territory
+                         displayTerritoryInfo(gameState.selectedTerritoryId);
+                     }
+                 }
+            }
+        }
+
+        function handleTerritoryClick(event) {
+             event.preventDefault();
+             // Perform raycast again on click (or use the last hovered object if logic allows)
+             gameState.raycaster.setFromCamera(gameState.mouse, gameState.camera);
+             const intersects = gameState.raycaster.intersectObjects(gameState.scene.children);
+
+             let clickedMesh = null;
+             for (let i = 0; i < intersects.length; i++) {
+                 if (intersects[i].object.userData.type === 'territory') {
+                     clickedMesh = intersects[i].object;
+                     break;
+                 }
+             }
+
+            if (!clickedMesh) {
+                 // Clicked outside a territory - deselect?
+                 console.log("Clicked empty space");
+                  // Maybe deselect based on phase
+                 if (gameState.phase !== 'attack' && gameState.phase !== 'fortify') {
+                      handleDeselect();
+                 }
+                return;
+            }
+
+             const clickedTerritoryId = clickedMesh.userData.territoryId;
+             console.log(`Clicked on territory: ${clickedTerritoryId}`);
+             gameState.sounds.click.play();
+
+             const player = getCurrentPlayer();
+             const territory = gameState.territories[clickedTerritoryId];
+
+             // --- State Machine Logic based on Phase ---
+              // FIX 5: Basic state management for clicks
+             switch (gameState.phase) {
+                 case 'initial_deploy':
+                 case 'deploy':
+                     if (territory.owner === player.id) {
+                         setSelectedTerritory(clickedTerritoryId);
+                         // Enable deploy button if armies > 0
+                     } else {
+                         console.log("Cannot deploy to territory you don't own.");
+                         // Maybe show message to user
+                     }
+                     break;
+
+                 case 'attack':
+                     if (territory.owner === player.id && territory.armies > 1) {
+                         // Selecting own territory to attack FROM
+                         setFromTerritory(clickedTerritoryId);
+                     } else if (gameState.fromTerritoryId && territory.owner !== player.id) {
+                         // Selecting enemy territory to attack TO (check adjacency)
+                         const fromTerritory = gameState.territories[gameState.fromTerritoryId];
+                         if (fromTerritory.neighbors.has(clickedTerritoryId)) {
+                             setSelectedTerritory(clickedTerritoryId);
+                             // Enable attack button
+                         } else {
+                             console.log("Cannot attack non-adjacent territory.");
+                              handleDeselectTarget(); // Deselect only the target
+                         }
+                     } else {
+                         console.log("Invalid selection for attack phase.");
+                         // If selecting own territory with 1 army, or enemy without selecting 'from' first
+                         handleDeselect();
+                     }
+                     break;
+
+                 case 'fortify':
+                     if (!gameState.fromTerritoryId && territory.owner === player.id && territory.armies > 1) {
+                         // Selecting own territory to fortify FROM
+                         setFromTerritory(clickedTerritoryId);
+                     } else if (gameState.fromTerritoryId && territory.owner === player.id && clickedTerritoryId !== gameState.fromTerritoryId) {
+                         // Selecting own territory to fortify TO (check connectivity - simplified to adjacency for now)
+                         // TODO: Implement proper path checking through owned territories
+                         const fromTerritory = gameState.territories[gameState.fromTerritoryId];
+                         if (fromTerritory.neighbors.has(clickedTerritoryId)) { // Simple adjacency check
+                             setSelectedTerritory(clickedTerritoryId);
+                             // Enable fortify button / Show prompt for how many armies
+                         } else {
+                              console.log("Cannot fortify to non-adjacent/non-connected territory (simplified check).");
+                              handleDeselectTarget();
+                         }
+                     } else {
+                         console.log("Invalid selection for fortify phase.");
+                         handleDeselect();
+                     }
+                     break;
+             }
+
+             updateUI(); // Update buttons and potentially info panel
+         }
+
+         // Action button handlers
+         function handleDeployClick() {
+             if (gameState.phase !== 'deploy' && gameState.phase !== 'initial_deploy') return;
+             if (!gameState.selectedTerritoryId || gameState.armiesToPlace <= 0) return;
+
+             const territory = gameState.territories[gameState.selectedTerritoryId];
+             if (territory.owner !== getCurrentPlayer().id) return;
+
+             territory.armies++;
+             gameState.armiesToPlace--;
+              if (gameState.phase === 'initial_deploy') {
+                 getCurrentPlayer().armiesToPlace--; // Track initial placement per player
+              }
+
+             console.log(`Deployed 1 army to ${territory.name}. ${gameState.armiesToPlace} remaining.`);
+             gameState.sounds.deploy.play();
+
+             // Update visuals
+             updateTerritoryVisuals(gameState.selectedTerritoryId);
+             updateUI(); // Update counts and button states
+
+             // Auto-advance phase if initial deployment is done for this player
+             if (gameState.phase === 'initial_deploy' && gameState.armiesToPlace === 0) {
+                 console.log(`${getCurrentPlayer().name} finished initial deployment.`);
+                 advancePhase(); // Will check if all players done or move to next
+             }
+         }
+
+          function handleAttackClick() {
+             if (gameState.phase !== 'attack' || !gameState.fromTerritoryId || !gameState.selectedTerritoryId) return;
+             // Prompt for number of dice (simplified: use max possible)
+             const attackerTerritory = gameState.territories[gameState.fromTerritoryId];
+             const attackerDice = Math.min(3, attackerTerritory.armies - 1);
+
+             if (attackerDice < 1) {
+                 console.log("Not enough armies to attack.");
+                 return;
+             }
+
+             performAttack(gameState.fromTerritoryId, gameState.selectedTerritoryId, attackerDice);
+             // Don't deselect 'from' territory automatically after one attack
+             // gameState.fromTerritoryId = null; // Or keep it selected?
+             gameState.selectedTerritoryId = null; // Deselect target after attack attempt
+             updateUI();
+          }
+
+         function handleFortifyClick() {
+             if (gameState.phase !== 'fortify' || !gameState.fromTerritoryId || !gameState.selectedTerritoryId) return;
+
+             const fromTerritory = gameState.territories[gameState.fromTerritoryId];
+             const maxArmiesToMove = fromTerritory.armies - 1;
+
+             if (maxArmiesToMove <= 0) {
+                 alert("Not enough armies to move.");
+                 return;
+             }
+
+             // Simple prompt for number of armies
+             const numArmies = parseInt(prompt(`Move how many armies from ${fromTerritory.name} to ${gameState.territories[gameState.selectedTerritoryId].name}? (Max: ${maxArmiesToMove})`, "1"));
+
+             if (!isNaN(numArmies) && numArmies > 0 && numArmies <= maxArmiesToMove) {
+                 performFortify(gameState.fromTerritoryId, gameState.selectedTerritoryId, numArmies);
+                 // performFortify calls endTurn, which updates UI
+             } else {
+                 alert("Invalid number of armies.");
+             }
+         }
+
+         // Selection Helper Functions
+         function setSelectedTerritory(territoryId) {
+             // Deselect previous target visual (if different)
+             if (gameState.selectedTerritoryMesh && gameState.selectedTerritoryMesh.userData.territoryId !== territoryId) {
+                gameState.selectedTerritoryMesh.scale.set(1, 1, 1); // Reset scale
+                 // Reset other visual cues if needed
+             }
+
+             gameState.selectedTerritoryId = territoryId;
+             gameState.selectedTerritoryMesh = gameState.territoryMeshes[territoryId];
+
+             // Apply selection visual
+             if (gameState.selectedTerritoryMesh) {
+                gameState.selectedTerritoryMesh.scale.set(1.4, 1.4, 1.4); // Make selected slightly larger
+                // Add other visual cues (e.g., brighter emissive)
+             }
+              displayTerritoryInfo(territoryId); // Show info for selected
+         }
+
+        function setFromTerritory(territoryId) {
+             // Deselect previous 'from' visual (if different)
+             if (gameState.fromTerritoryId && gameState.fromTerritoryId !== territoryId) {
+                 // Reset visual cue for 'from' territory if needed (e.g., outline)
+                  // For now, just rely on scale reset if it was also the selectedMesh
+                 const oldFromMesh = gameState.territoryMeshes[gameState.fromTerritoryId];
+                 if (oldFromMesh && oldFromMesh !== gameState.selectedTerritoryMesh) {
+                    oldFromMesh.scale.set(1, 1, 1);
+                 }
+             }
+
+             gameState.fromTerritoryId = territoryId;
+             // Apply visual cue for 'from' territory (e.g., outline, slight scale increase)
+             // We'll use the main selection visual for now if it's the only one selected
+             setSelectedTerritory(territoryId); // Select it visually
+              // If a 'target' was previously selected, deselect it visually
+              handleDeselectTarget();
+
+         }
+
+         function handleDeselect() {
+             // Deselect both 'from' and 'target'
+             handleDeselectFrom();
+             handleDeselectTarget();
+             updateUI();
+         }
+         function handleDeselectTarget() {
+             if (gameState.selectedTerritoryMesh) {
+                 // Don't reset scale if it's also the 'from' territory
+                 if (!gameState.fromTerritoryId || gameState.selectedTerritoryId !== gameState.fromTerritoryId) {
+                     gameState.selectedTerritoryMesh.scale.set(1, 1, 1);
+                 }
+             }
+             gameState.selectedTerritoryId = null;
+             gameState.selectedTerritoryMesh = null;
+             territoryInfoDiv.style.display = 'none'; // Hide panel if only target is deselected
+         }
+          function handleDeselectFrom() {
+              if (gameState.fromTerritoryId) {
+                 const fromMesh = gameState.territoryMeshes[gameState.fromTerritoryId];
+                 if (fromMesh && (!gameState.selectedTerritoryId || gameState.selectedTerritoryId !== gameState.fromTerritoryId)) {
+                     fromMesh.scale.set(1, 1, 1);
+                 }
+             }
+             gameState.fromTerritoryId = null;
+          }
+
+
+        function handleResize() {
+            if (!gameState.camera || !gameState.renderer) return;
+            // Update camera aspect ratio
+            gameState.camera.aspect = threeContainer.clientWidth / threeContainer.clientHeight;
+            gameState.camera.updateProjectionMatrix();
+
+            // Update renderer size
+            gameState.renderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight);
+        }
+
+        // Helper function to shuffle array
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        // ==================
+        // STARTUP
+        // ==================
+        document.addEventListener('DOMContentLoaded', () => {
+             console.log("DOM Loaded. Setting up.");
+             // Get UI Elements
+             uiContainer = document.getElementById('ui-container');
+             playerInfoDiv = document.getElementById('player-list');
+             gamePhaseDiv = document.getElementById('game-phase');
+             territoryInfoDiv = document.getElementById('territory-info');
+             actionButtonsDiv = document.getElementById('action-buttons');
+             currentPlayerNameSpan = document.getElementById('current-player-name');
+             currentPhaseSpan = document.getElementById('current-phase');
+             armiesToPlaceSpan = document.getElementById('armies-to-place');
+             infoTerritoryNameSpan = document.getElementById('info-territory-name');
+             infoTerritoryOwnerSpan = document.getElementById('info-territory-owner');
+             infoTerritoryArmiesSpan = document.getElementById('info-territory-armies');
+             btnDeploy = document.getElementById('btn-deploy');
+             btnAttack = document.getElementById('btn-attack');
+             btnFortify = document.getElementById('btn-fortify');
+             btnEndPhase = document.getElementById('btn-end-phase');
+             btnEndTurn = document.getElementById('btn-end-turn');
+             setupModal = document.getElementById('setup-modal');
+             startGameBtn = document.getElementById('start-game-btn');
+             playerCountSelect = document.getElementById('player-count');
+             diceAreaDiv = document.getElementById('dice-area');
+             attackerDiceSpan = document.getElementById('attacker-dice');
+             defenderDiceSpan = document.getElementById('defender-dice');
+             battleResultDiv = document.getElementById('battle-result');
+
+
+             // Check if all elements found
+             if (!uiContainer || !startGameBtn || !playerCountSelect || !threeContainer) {
+                 console.error("Failed to find critical UI elements! Aborting.");
+                 return;
+             }
+
+            // Hide main UI initially
+            uiContainer.style.display = 'none';
+
+            // Setup Modal Listener
+            startGameBtn.addEventListener('click', () => {
+                const selectedPlayers = parseInt(playerCountSelect.value, 10);
+                if (selectedPlayers >= 2 && selectedPlayers <= 6) {
+                     // FIX 4: Initialize game AFTER clicking start
+                    initializeGame(selectedPlayers);
+                } else {
+                    alert("Please select a valid number of players (2-6).");
+                }
+            });
+
+            console.log("Setup complete. Waiting for user to start game.");
+        });
+
+    </script>
+<p style="border-radius: 8px; text-align: center; font-size: 12px; color: #fff; margin-top: 16px;position: fixed; left: 8px; bottom: 8px; z-index: 10; background: rgba(0, 0, 0, 0.8); padding: 4px 8px;">Made with <img src="https://enzostvs-deepsite.hf.space/logo.svg" alt="DeepSite Logo" style="width: 16px; height: 16px; vertical-align: middle;display:inline-block;margin-right:3px;filter:brightness(0) invert(1);"><a href="https://enzostvs-deepsite.hf.space" style="color: #fff;text-decoration: underline;" target="_blank" >DeepSite</a> - <a href="https://enzostvs-deepsite.hf.space?remix=jackboy70/game" style="color: #fff;text-decoration: underline;" target="_blank" >🧬 Remix</a></p></body>
+</html>
