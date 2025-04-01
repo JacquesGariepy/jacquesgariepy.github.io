@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HTML File Explorer</title>
+    <title>HTML File Explorer (Select Directory)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js"></script>
@@ -11,87 +11,59 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        /* Apply Inter font globally */
-        body {
-            font-family: 'Inter', sans-serif;
-        }
-        /* Styling for thumbnail hover effect */
-        .thumbnail-container {
-            perspective: 1000px;
-        }
+        body { font-family: 'Inter', sans-serif; }
+        .thumbnail-container { perspective: 1000px; }
         .thumbnail {
             transition: all 0.3s ease;
             transform-style: preserve-3d;
-            border-radius: 0.75rem; /* Consistent rounded corners */
+            border-radius: 0.75rem;
         }
         .thumbnail:hover {
             transform: translateY(-5px) rotateX(5deg);
             box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
         }
-        /* Styling for the image container within the thumbnail */
-        .thumbnail-img {
+        .thumbnail-content { /* Renamed from thumbnail-img */
             height: 200px;
-            object-fit: cover;
-            background-color: #f3f4f6; /* Light gray background */
+            background-color: #f3f4f6;
             display: flex;
             align-items: center;
             justify-content: center;
             border-top-left-radius: 0.75rem;
             border-top-right-radius: 0.75rem;
-            overflow: hidden; /* Ensure image stays within rounded corners */
+            overflow: hidden;
+            text-align: center; /* Center icon/text */
         }
-        /* Loading spinner animation */
-        .loading-spinner {
-            animation: spin 1s linear infinite;
+        .thumbnail-content img { /* Style for actual image thumbnails */
+             width: 100%;
+             height: 100%;
+             object-fit: cover;
         }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .thumbnail-content .icon-placeholder { /* Style for icon fallback */
+            font-size: 3rem; /* Larger icon */
+            color: #9ca3af; /* Gray color */
         }
-        /* Placeholder style for images while loading or on error */
-        .screenshot-placeholder {
-            background: linear-gradient(135deg, #f3f4f6 25%, #e5e7eb 25%, #e5e7eb 50%, #f3f4f6 50%, #f3f4f6 75%, #e5e7eb 75%);
-            background-size: 20px 20px;
-        }
-        /* Ensure all elements have rounded corners */
-        input, .bg-white {
-            border-radius: 0.75rem;
-        }
+        .loading-spinner { animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        input, .bg-white, button { border-radius: 0.75rem; }
         /* Style for the DeepSite footer */
-        .deepsite-footer {
-            border-radius: 8px;
-            text-align: center;
-            font-size: 12px;
-            color: #fff;
-            margin-top: 16px;
-            position: fixed;
-            left: 8px;
-            bottom: 8px;
-            z-index: 10;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 4px 8px;
-        }
-        .deepsite-footer img {
-            width: 16px;
-            height: 16px;
-            vertical-align: middle;
-            display: inline-block;
-            margin-right: 3px;
-            filter: brightness(0) invert(1);
-        }
-        .deepsite-footer a {
-            color: #fff;
-            text-decoration: underline;
-        }
+        .deepsite-footer { /* Keep footer styling */ }
+        /* Hide the actual file input */
+        #directoryInput { display: none; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
     <div class="container mx-auto px-4 py-8">
-        <header class="mb-12 text-center">
+        <header class="mb-8 text-center">
             <h1 class="text-4xl font-bold text-indigo-700 mb-2">HTML Explorer</h1>
-            <p class="text-gray-600 max-w-2xl mx-auto">Browse all HTML pages in this directory</p>
+            <p class="text-gray-600 max-w-2xl mx-auto mb-6">Select a local directory to view its HTML files.</p>
 
-            <div class="mt-6 flex justify-center">
+            <button id="selectDirBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-6 rounded-lg shadow transition duration-200 ease-in-out inline-flex items-center">
+                <i class="fas fa-folder-open mr-2"></i>
+                Select Directory
+            </button>
+            <input type="file" id="directoryInput" webkitdirectory directory multiple />
+
+             <div id="searchBox" class="mt-6 flex justify-center hidden">
                 <div class="relative w-full max-w-md">
                     <input type="text" id="searchInput" placeholder="Search for a page..."
                            class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -101,41 +73,28 @@
         </header>
 
         <main>
-            <div class="bg-white shadow-sm p-6 mb-8 grid grid-cols-1 md:grid-cols-3 gap-4 rounded-xl">
+            <div id="statsBox" class="bg-white shadow-sm p-6 mb-8 grid grid-cols-1 md:grid-cols-3 gap-4 rounded-xl hidden">
                 <div class="text-center p-4 border border-gray-100 rounded-lg">
-                    <div class="text-indigo-600 mb-2">
-                        <i class="fas fa-file-alt text-3xl"></i>
-                    </div>
+                    <div class="text-indigo-600 mb-2"><i class="fas fa-file-alt text-3xl"></i></div>
                     <h3 class="text-xl font-semibold text-gray-800" id="totalPages">0</h3>
-                    <p class="text-gray-500">HTML Pages</p>
+                    <p class="text-gray-500">HTML Files Found</p>
                 </div>
                 <div class="text-center p-4 border border-gray-100 rounded-lg">
-                    <div class="text-green-600 mb-2">
-                        <i class="fas fa-calendar-day text-3xl"></i>
-                    </div>
-                    <h3 class="text-xl font-semibold text-gray-800" id="lastUpdated">Today</h3>
-                    <p class="text-gray-500">Last Updated</p>
+                     <div class="text-green-600 mb-2"><i class="fas fa-clock text-3xl"></i></div>
+                    <h3 class="text-xl font-semibold text-gray-800" id="timeSelected">-</h3>
+                    <p class="text-gray-500">Time Selected</p>
                 </div>
                 <div class="text-center p-4 border border-gray-100 rounded-lg">
-                    <div class="text-purple-600 mb-2">
-                        <i class="fas fa-folder-open text-3xl"></i>
-                    </div>
-                    <h3 class="text-xl font-semibold text-gray-800" id="directoryName">Directory</h3>
-                    <p class="text-gray-500">Current Location</p>
+                    <div class="text-purple-600 mb-2"><i class="fas fa-folder text-3xl"></i></div>
+                    <h3 class="text-xl font-semibold text-gray-800 truncate px-2" id="directoryName" title="Selected Directory">-</h3>
+                    <p class="text-gray-500">Selected Directory</p>
                 </div>
             </div>
 
-            <div id="loading" class="text-center py-12">
-                <div class="inline-block loading-spinner text-indigo-600">
-                    <i class="fas fa-spinner text-4xl"></i>
-                </div>
-                <p class="mt-4 text-gray-600">Scanning directory...</p>
-            </div>
-
-            <div id="noResults" class="hidden text-center py-12 bg-white rounded-xl shadow-sm">
-                <i class="fas fa-search text-5xl text-gray-400 mb-4"></i>
-                <h3 class="text-xl font-semibold text-gray-700">No results found</h3>
-                <p class="text-gray-500 mt-2">Try different search terms</p>
+            <div id="infoArea" class="text-center py-12 bg-white rounded-xl shadow-sm">
+                 <i class="fas fa-hand-pointer text-5xl text-indigo-400 mb-4"></i>
+                 <h3 class="text-xl font-semibold text-gray-700">Select a Directory</h3>
+                 <p class="text-gray-500 mt-2">Click the button above to choose a folder from your computer.</p>
             </div>
 
             <div id="thumbnailsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 hidden">
@@ -143,360 +102,335 @@
         </main>
 
         <footer class="mt-16 text-center text-gray-500 text-sm">
-            <p id="copyright">© 2025 HTML Explorer. All rights reserved.</p>
-            <p class="mt-1">Real-time thumbnail generation with html-to-image</p>
+             <p id="copyright">© 2025 HTML Explorer. All rights reserved.</p>
+             <p class="mt-1">Thumbnail generation attempted with html-to-image.</p>
         </footer>
     </div>
 
     <p class="deepsite-footer">Made with <img src="https://enzostvs-deepsite.hf.space/logo.svg" alt="DeepSite Logo"><a href="https://enzostvs-deepsite.hf.space" target="_blank">DeepSite</a> - <a href="https://enzostvs-deepsite.hf.space?remix=jackboy70/files" target="_blank">🧬 Remix</a></p>
 
     <script>
-        document.addEventListener('DOMContentLoaded', async function() {
+        document.addEventListener('DOMContentLoaded', function() {
+
             // --- Configuration ---
-            const CACHE_ENABLED = true; // Enable/disable thumbnail caching
-            const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // Cache thumbnails for 24 hours
-            const THUMBNAIL_QUALITY = 0.6; // Thumbnail image quality (0.1 to 1.0)
-            const THUMBNAIL_DELAY_MS = 500; // Delay before capturing thumbnail (allows rendering)
-            const PLACEHOLDER_LOADING = 'https://placehold.co/400x300/f3f4f6/cbd5e1?text=Loading...';
-            const PLACEHOLDER_ERROR = 'https://placehold.co/400x300/fecaca/991b1b?text=Thumbnail+Error';
+            const THUMBNAIL_GENERATION_ENABLED = true; // Attempt to generate image thumbnails
+            const THUMBNAIL_QUALITY = 0.5;
+            const THUMBNAIL_DELAY_MS = 600; // Increased delay for local files
+            const PLACEHOLDER_LOADING = 'https://placehold.co/400x200/f3f4f6/cbd5e1?text=Loading...';
+            const PLACEHOLDER_ERROR = 'https://placehold.co/400x200/fecaca/991b1b?text=Preview+Error';
+            const ICON_FALLBACK_CLASS = 'fas fa-file-code icon-placeholder'; // Font Awesome class for fallback
 
             // --- DOM Elements ---
-            const loadingDiv = document.getElementById('loading');
-            const noResultsDiv = document.getElementById('noResults');
-            const grid = document.getElementById('thumbnailsGrid');
+            const selectDirBtn = document.getElementById('selectDirBtn');
+            const directoryInput = document.getElementById('directoryInput');
+            const searchBox = document.getElementById('searchBox');
             const searchInput = document.getElementById('searchInput');
+            const statsBox = document.getElementById('statsBox');
+            const infoArea = document.getElementById('infoArea');
+            const grid = document.getElementById('thumbnailsGrid');
             const totalPagesEl = document.getElementById('totalPages');
-            const lastUpdatedEl = document.getElementById('lastUpdated');
+            const timeSelectedEl = document.getElementById('timeSelected');
             const directoryNameEl = document.getElementById('directoryName');
             const copyrightEl = document.getElementById('copyright');
 
             // --- State ---
-            let allHtmlFiles = []; // Holds all fetched file data
-            let thumbnailCache = {}; // In-memory cache
+            let currentFiles = []; // Holds the File objects from the selected directory
+            let objectUrls = new Map(); // To keep track of created object URLs for cleanup
 
             // --- Initialization ---
-            init();
+            updateCopyrightYear();
+            setupEventListeners();
 
-            async function init() {
-                // Update dynamic elements
-                updateCopyrightYear();
-                updateDirectoryName();
-                loadCache();
+            function setupEventListeners() {
+                selectDirBtn.addEventListener('click', () => {
+                    directoryInput.click(); // Trigger the hidden file input
+                });
 
-                try {
-                    // Fetch HTML files from the current directory
-                    // IMPORTANT: This requires server-side support for directory listing
-                    // It might return a standard HTML page or an error if not configured
-                    const response = await fetch('./?restype=listing'); // Standard convention, might vary
-
-                    if (!response.ok) {
-                        if (response.status === 404) {
-                             throw new Error('Directory listing not found or not enabled on this server.');
-                        }
-                        throw new Error(`Failed to fetch directory listing (Status: ${response.status})`);
-                    }
-
-                    const htmlText = await response.text();
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(htmlText, 'text/html');
-
-                    // Find links ending with .html (adjust selector if needed)
-                    const links = Array.from(doc.querySelectorAll('a[href$=".html"]'));
-
-                    // Extract file information
-                    // Note: lastModified and size might not be available from simple listing
-                    const fetchedFiles = links.map(link => {
-                        const href = link.getAttribute('href');
-                        // Basic name extraction, might need refinement
-                        const name = link.textContent.replace('.html', '').trim() || href.replace('.html', '');
-                        return {
-                            name: name,
-                            path: href,
-                            // These are often unavailable via simple HTTP listing
-                            lastModified: 'N/A',
-                            size: 'N/A'
-                        };
-                    });
-
-                    // Filter out the current index page
-                    const currentPage = window.location.pathname.split('/').pop();
-                    allHtmlFiles = fetchedFiles.filter(file => file.path !== currentPage && file.path !== './');
-
-                    if (allHtmlFiles.length === 0) {
-                        showEmptyDirectoryMessage();
-                        return;
-                    }
-
-                    // Update stats
-                    totalPagesEl.textContent = allHtmlFiles.length;
-                    // Use a generic "Today" or fetch server date if possible
-                    lastUpdatedEl.textContent = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-
-                    // Display thumbnails
-                    await displayThumbnails(allHtmlFiles);
-
-                    // Hide loading, show grid
-                    loadingDiv.classList.add('hidden');
-                    grid.classList.remove('hidden');
-
-                    // Setup search functionality
-                    searchInput.addEventListener('input', handleSearch);
-
-                } catch (error) {
-                    console.error('Initialization Error:', error);
-                    showErrorMessage(error.message);
-                }
+                directoryInput.addEventListener('change', handleDirectorySelection);
+                searchInput.addEventListener('input', handleSearch);
             }
 
-            // --- Core Functions ---
+            function handleDirectorySelection(event) {
+                cleanupObjectUrls(); // Clean up URLs from previous selection
+                const files = event.target.files;
+                if (!files || files.length === 0) {
+                    showInfoMessage('No directory selected or directory is empty.', 'fas fa-folder-open');
+                    hideAuxiliaryUI();
+                    return;
+                }
+
+                // Filter for HTML files
+                currentFiles = Array.from(files).filter(file => file.name.toLowerCase().endsWith('.html'));
+
+                if (currentFiles.length === 0) {
+                    showInfoMessage('No HTML files found in the selected directory.', 'fas fa-file-excel');
+                     hideAuxiliaryUI();
+                    return;
+                }
+
+                // Update UI
+                updateStats(currentFiles);
+                displayThumbnails(currentFiles);
+                showAuxiliaryUI();
+                infoArea.classList.add('hidden'); // Hide initial prompt
+                grid.classList.remove('hidden');
+                searchInput.value = ''; // Reset search
+            }
 
             function handleSearch(e) {
                 const searchTerm = e.target.value.toLowerCase().trim();
-                const filteredFiles = allHtmlFiles.filter(file =>
+                const filteredFiles = currentFiles.filter(file =>
                     file.name.toLowerCase().includes(searchTerm) ||
-                    file.path.toLowerCase().includes(searchTerm)
+                    (file.webkitRelativePath && file.webkitRelativePath.toLowerCase().includes(searchTerm)) // Search path too if available
                 );
 
                 if (filteredFiles.length === 0 && searchTerm) {
                     grid.classList.add('hidden');
-                    noResultsDiv.classList.remove('hidden');
+                    showInfoMessage(`No files found matching "${searchTerm}".`, 'fas fa-search', false); // isInitial=false
                 } else {
-                    noResultsDiv.classList.add('hidden');
+                    infoArea.classList.add('hidden');
                     grid.classList.remove('hidden');
-                    // Re-display thumbnails for the filtered set
-                    displayThumbnails(filteredFiles, true); // Pass true to indicate filtering
+                    displayThumbnails(filteredFiles); // Re-render grid with filtered files
                 }
             }
 
-            async function displayThumbnails(files, isFiltering = false) {
+             function displayThumbnails(files) {
                 grid.innerHTML = ''; // Clear existing thumbnails
+                cleanupObjectUrls(); // Clean up previous URLs before creating new ones
 
-                // Use Promise.all for potentially faster rendering, especially when cached
-                const thumbnailPromises = files.map(file => createThumbnailElement(file));
-                await Promise.all(thumbnailPromises);
+                if (files.length === 0 && searchInput.value) {
+                     // This case is handled by handleSearch showing the info message
+                     return;
+                 } else if (files.length === 0) {
+                     showInfoMessage('No HTML files to display.', 'fas fa-file-excel');
+                     return;
+                 }
 
-                 // Only trigger generation if not just filtering based on existing cache
-                if (!isFiltering) {
-                    triggerThumbnailGeneration(files);
+
+                files.forEach(file => {
+                    createThumbnailElement(file); // Create element structure
+                });
+
+                // Trigger thumbnail generation asynchronously if enabled
+                if (THUMBNAIL_GENERATION_ENABLED) {
+                    // Delay slightly to allow elements to render first
+                     setTimeout(() => triggerThumbnailGeneration(files), 100);
                 }
             }
 
-            async function createThumbnailElement(file) {
-                const thumbnailId = `thumb-${file.path.replace(/[^a-z0-9]/gi, '-')}`;
-                const cacheKey = `thumb-${file.path}`;
-                const cachedItem = thumbnailCache[cacheKey];
-                let imageSrc = PLACEHOLDER_LOADING;
-
-                // Use cached image if valid
-                if (CACHE_ENABLED && cachedItem && (Date.now() - cachedItem.timestamp < CACHE_DURATION_MS)) {
-                    imageSrc = cachedItem.dataUrl;
-                }
+            function createThumbnailElement(file) {
+                const thumbnailId = `thumb-${file.webkitRelativePath || file.name}`.replace(/[^a-z0-9]/gi, '-');
+                const filePath = file.webkitRelativePath || file.name; // Prefer relative path
 
                 const thumbnailContainer = document.createElement('div');
                 thumbnailContainer.className = 'thumbnail-container';
+
+                // Initial structure with placeholder or icon
                 thumbnailContainer.innerHTML = `
                     <div id="${thumbnailId}" class="thumbnail bg-white overflow-hidden shadow-md hover:shadow-lg border border-gray-100">
-                        <a href="${file.path}" target="_blank" class="block">
-                            <div class="thumbnail-img">
-                                <img src="${imageSrc}" alt="Thumbnail for ${file.name}" class="w-full h-full object-cover" loading="lazy" onerror="this.src='${PLACEHOLDER_ERROR}';">
+                        <a href="#" class="block" title="Click to attempt opening ${filePath}">
+                            <div class="thumbnail-content">
+                                ${THUMBNAIL_GENERATION_ENABLED
+                                    ? `<img src="${PLACEHOLDER_LOADING}" alt="Loading preview..." class="w-full h-full object-cover" data-file-path="${filePath}">`
+                                    : `<i class="${ICON_FALLBACK_CLASS}" title="${filePath}"></i>`
+                                }
                             </div>
                             <div class="p-4">
-                                <h3 class="font-semibold text-lg text-gray-800 mb-1 truncate" title="${file.name}">${file.name}</h3>
-                                <div class="flex justify-between text-sm text-gray-500 mt-2">
-                                    <span class="truncate" title="${file.path}"><i class="fas fa-link mr-1"></i> ${file.path}</span>
-                                    </div>
+                                <h3 class="font-semibold text-base text-gray-800 mb-1 truncate" title="${file.name}">${file.name}</h3>
+                                <p class="text-sm text-gray-500 truncate" title="${filePath}">
+                                    <i class="fas fa-folder-tree mr-1 opacity-75"></i>${filePath}
+                                </p>
                             </div>
                         </a>
                     </div>
                 `;
+
+                // Add click listener to attempt opening the file (might be blocked by browser)
+                 const link = thumbnailContainer.querySelector('a');
+                 link.addEventListener('click', (e) => {
+                     e.preventDefault();
+                     // Create a temporary URL to try opening the file
+                     const tempUrl = URL.createObjectURL(file);
+                     const openedWindow = window.open(tempUrl, '_blank');
+                      // Revoke the temporary URL after a short delay,
+                      // allowing the browser time to potentially load it.
+                     setTimeout(() => URL.revokeObjectURL(tempUrl), 1000);
+                     if (!openedWindow) {
+                         alert("Could not open the file. Pop-ups might be blocked, or the browser prevented opening the local file.");
+                     }
+                 });
+
+
                 grid.appendChild(thumbnailContainer);
             }
 
              async function triggerThumbnailGeneration(files) {
-                for (const file of files) {
-                    const cacheKey = `thumb-${file.path}`;
-                    const cachedItem = thumbnailCache[cacheKey];
+                 console.log("Attempting thumbnail generation for", files.length, "files...");
+                 for (const file of files) {
+                     // Add a small delay between attempts
+                     await new Promise(resolve => setTimeout(resolve, 50));
+                     generateThumbnail(file); // This remains async
+                 }
+             }
 
-                    // Generate only if not cached or cache expired
-                    if (!CACHE_ENABLED || !cachedItem || (Date.now() - cachedItem.timestamp >= CACHE_DURATION_MS)) {
-                         // Add a small delay between iframe creations to avoid overwhelming the browser
-                        await new Promise(resolve => setTimeout(resolve, 50));
-                        generateAndCacheThumbnail(file);
-                    }
-                }
-            }
+             async function generateThumbnail(file) {
+                 if (!THUMBNAIL_GENERATION_ENABLED) return;
 
-            async function generateAndCacheThumbnail(file) {
-                const thumbnailId = `thumb-${file.path.replace(/[^a-z0-9]/gi, '-')}`;
-                const cacheKey = `thumb-${file.path}`;
-                const thumbnailElement = document.getElementById(thumbnailId);
-                const imgElement = thumbnailElement?.querySelector('img');
+                 const filePath = file.webkitRelativePath || file.name;
+                 const thumbnailId = `thumb-${filePath}`.replace(/[^a-z0-9]/gi, '-');
+                 const thumbnailElement = document.getElementById(thumbnailId);
+                 const contentDiv = thumbnailElement?.querySelector('.thumbnail-content');
+                 const imgElement = contentDiv?.querySelector('img'); // Get the img element specifically
 
-                // Create an iframe off-screen
-                const iframe = document.createElement('iframe');
-                iframe.style.position = 'absolute';
-                iframe.style.width = '800px'; // Larger iframe for better capture
-                iframe.style.height = '600px';
-                iframe.style.left = '-9999px'; // Move off-screen
-                iframe.style.top = '-9999px';
-                iframe.sandbox = 'allow-scripts allow-same-origin'; // Sandbox for security, adjust if needed
-                iframe.src = file.path;
+                 if (!thumbnailElement || !contentDiv || !imgElement) {
+                     console.warn(`Could not find elements for thumbnail ${thumbnailId}`);
+                     return;
+                 }
 
-                let iframeLoadTimeout;
+                 let objectUrl = null;
+                 let iframe = null;
 
-                iframe.onload = async () => {
-                    clearTimeout(iframeLoadTimeout); // Clear timeout on successful load
-                    try {
-                        // Wait for content to potentially render after load event
-                        await new Promise(resolve => setTimeout(resolve, THUMBNAIL_DELAY_MS));
+                 try {
+                     objectUrl = URL.createObjectURL(file);
+                     objectUrls.set(thumbnailId, objectUrl); // Track the URL
 
-                        if (!iframe.contentDocument || !iframe.contentDocument.body) {
-                            throw new Error("Iframe content is not accessible.");
-                        }
+                     iframe = document.createElement('iframe');
+                     iframe.style.position = 'absolute';
+                     iframe.style.width = '800px';
+                     iframe.style.height = '600px';
+                     iframe.style.left = '-9999px';
+                     iframe.style.top = '-9999px';
+                     // Sandboxing might interfere with rendering complex pages, but is safer.
+                     // Remove 'allow-same-origin' if pages don't need scripts or if it causes issues.
+                     iframe.sandbox = 'allow-scripts'; // allow-same-origin might taint canvas
+                     iframe.src = objectUrl;
 
-                         // Use html-to-image to capture the iframe body
-                        const dataUrl = await htmlToImage.toJpeg(iframe.contentDocument.body, {
-                            quality: THUMBNAIL_QUALITY,
-                            backgroundColor: '#ffffff',
-                            width: 800, // Match iframe width
-                            height: 600, // Match iframe height
-                            // Filter out scripts, styles, and potentially problematic elements
-                            filter: (node) => {
-                                const nodeName = node.tagName?.toUpperCase();
-                                return nodeName !== 'SCRIPT' && nodeName !== 'STYLE' && nodeName !== 'IFRAME';
-                            }
-                        });
+                     console.log(`Attempting to load ${filePath} into iframe`);
 
-                        // Update the thumbnail image source
-                        if (imgElement) {
-                            imgElement.src = dataUrl;
-                            imgElement.onerror = () => { imgElement.src = PLACEHOLDER_ERROR; }; // Reset onerror
-                        }
+                     await new Promise((resolve, reject) => {
+                         let timeoutId = setTimeout(() => reject(new Error("Iframe load timeout")), 10000);
+                         iframe.onload = () => { clearTimeout(timeoutId); resolve(); };
+                         iframe.onerror = (err) => { clearTimeout(timeoutId); reject(new Error(`Iframe load error: ${err}`)); };
+                         document.body.appendChild(iframe);
+                     });
 
-                        // Cache the result
-                        if (CACHE_ENABLED) {
-                            thumbnailCache[cacheKey] = { dataUrl: dataUrl, timestamp: Date.now() };
-                            saveCache();
-                        }
+                     console.log(`Iframe loaded for ${filePath}. Waiting for render...`);
+                     await new Promise(resolve => setTimeout(resolve, THUMBNAIL_DELAY_MS));
 
-                    } catch (err) {
-                        console.error(`Error generating thumbnail for ${file.path}:`, err);
-                        if (imgElement) {
-                            imgElement.src = PLACEHOLDER_ERROR;
-                        }
-                        // Optionally cache the error state to avoid retrying immediately
-                        // cacheThumbnail(cacheKey, PLACEHOLDER_ERROR);
-                    } finally {
-                        // Clean up the iframe
-                        document.body.removeChild(iframe);
-                    }
-                };
+                     if (!iframe.contentDocument || !iframe.contentDocument.body) {
+                         throw new Error("Iframe content not accessible.");
+                     }
+                      if (iframe.contentDocument.body.innerHTML.trim() === '') {
+                         console.warn(`Iframe body is empty for ${filePath}.`);
+                         // Don't throw error, just fallback to icon later
+                     }
 
-                iframe.onerror = (err) => {
-                     clearTimeout(iframeLoadTimeout);
-                    console.error(`Error loading iframe for ${file.path}:`, err);
-                     if (imgElement) {
-                        imgElement.src = PLACEHOLDER_ERROR;
-                    }
-                    document.body.removeChild(iframe);
-                };
+                     // --- Attempt html-to-image ---
+                     // This is the part most likely to fail due to security restrictions (tainted canvas)
+                     // when dealing with local files (file:// or blob: URLs in iframes).
+                     const dataUrl = await htmlToImage.toJpeg(iframe.contentDocument.body, {
+                         quality: THUMBNAIL_QUALITY,
+                         backgroundColor: '#ffffff',
+                         width: 800,
+                         height: 600,
+                         filter: (node) => node.tagName?.toUpperCase() !== 'SCRIPT' && node.tagName?.toUpperCase() !== 'STYLE',
+                     });
 
-                // Add a timeout in case iframe loading hangs
-                iframeLoadTimeout = setTimeout(() => {
-                    console.warn(`Timeout loading iframe for ${file.path}`);
-                    if (imgElement) {
-                        imgElement.src = PLACEHOLDER_ERROR; // Indicate timeout/error
-                    }
-                     if (document.body.contains(iframe)) {
-                        document.body.removeChild(iframe);
-                    }
-                }, 15000); // 15 second timeout
+                     console.log(`Successfully generated thumbnail for ${filePath}`);
+                     imgElement.src = dataUrl; // Update the existing img tag
+                     imgElement.alt = `Preview of ${file.name}`;
+                     imgElement.onerror = () => { // Add error handler for the generated image itself
+                         console.warn(`Generated thumbnail image failed to load for ${filePath}`);
+                         showIconFallback(contentDiv, filePath);
+                     };
 
 
-                document.body.appendChild(iframe);
-            }
+                 } catch (err) {
+                     console.warn(`Could not generate thumbnail for ${filePath}: ${err.message}. Falling back to icon.`);
+                     // Fallback to icon if generation fails
+                     showIconFallback(contentDiv, filePath);
+                     // Ensure the img tag is removed if it exists and failed
+                     if(imgElement && contentDiv.contains(imgElement)) {
+                         // contentDiv.removeChild(imgElement); // Option 1: Remove img
+                         imgElement.src = PLACEHOLDER_ERROR; // Option 2: Show error placeholder
+                         imgElement.alt = `Error generating preview for ${file.name}`;
+                         imgElement.onerror = null; // Prevent error loops
+                     }
+
+                 } finally {
+                     // Clean up iframe
+                     if (iframe && document.body.contains(iframe)) {
+                         document.body.removeChild(iframe);
+                     }
+                     // Don't revoke URL here, cleanup happens on new selection or page unload
+                 }
+             }
+
+             function showIconFallback(contentDiv, filePath) {
+                 if (!contentDiv) return;
+                  // Clear previous content (like loading image) and add icon
+                 contentDiv.innerHTML = `<i class="${ICON_FALLBACK_CLASS}" title="${filePath}"></i>`;
+             }
 
 
             // --- UI Update Functions ---
 
-            function showEmptyDirectoryMessage() {
-                loadingDiv.innerHTML = `
-                    <i class="fas fa-folder-open text-5xl text-gray-400 mb-4"></i>
-                    <h3 class="text-xl font-semibold text-gray-700">Directory Empty</h3>
-                    <p class="text-gray-500 mt-2">No HTML files found in this directory.</p>
-                `;
-                loadingDiv.classList.remove('hidden');
-                grid.classList.add('hidden');
+             function showInfoMessage(message, iconClass = 'fas fa-info-circle', isInitial = true) {
+                 infoArea.innerHTML = `
+                     <i class="${iconClass} text-5xl ${isInitial ? 'text-indigo-400' : 'text-gray-400'} mb-4"></i>
+                     <h3 class="text-xl font-semibold text-gray-700">${isInitial ? 'Information' : 'Search Result'}</h3>
+                     <p class="text-gray-500 mt-2">${message}</p>
+                 `;
+                 infoArea.classList.remove('hidden');
+             }
+
+            function updateStats(files) {
+                totalPagesEl.textContent = files.length;
+                timeSelectedEl.textContent = new Date().toLocaleTimeString('en-US');
+
+                // Try to get a base directory name
+                let dirName = "Selected Directory";
+                if (files.length > 0 && files[0].webkitRelativePath) {
+                    const pathParts = files[0].webkitRelativePath.split('/');
+                    if (pathParts.length > 1) {
+                        dirName = pathParts[0]; // Use the first part as directory name
+                    } else {
+                        dirName = "/"; // Root of selection
+                    }
+                } else if (files.length > 0) {
+                     dirName = "Selected Files" // No relative path available
+                }
+                directoryNameEl.textContent = dirName;
+                directoryNameEl.title = dirName; // Set tooltip
             }
 
-            function showErrorMessage(message) {
-                loadingDiv.innerHTML = `
-                    <i class="fas fa-exclamation-triangle text-5xl text-red-400 mb-4"></i>
-                    <h3 class="text-xl font-semibold text-gray-700">Loading Error</h3>
-                    <p class="text-gray-500 mt-2">${message}</p>
-                    <p class="text-sm text-gray-400 mt-4">Check browser console for details. Directory listing might require specific server configuration.</p>
-                `;
-                 loadingDiv.classList.remove('hidden');
-                 grid.classList.add('hidden');
-            }
+             function showAuxiliaryUI() {
+                 searchBox.classList.remove('hidden');
+                 statsBox.classList.remove('hidden');
+             }
+              function hideAuxiliaryUI() {
+                 searchBox.classList.add('hidden');
+                 statsBox.classList.add('hidden');
+                 grid.classList.add('hidden'); // Also hide grid
+             }
 
-            function updateDirectoryName() {
-                // Attempt to get a more user-friendly directory name
-                const pathParts = window.location.pathname.split('/').filter(Boolean);
-                const currentDir = pathParts.pop() || 'Root'; // Use 'Root' if it's the base directory
-                directoryNameEl.textContent = currentDir;
-            }
 
             function updateCopyrightYear() {
                 const currentYear = new Date().getFullYear();
                 copyrightEl.textContent = `© ${currentYear} HTML Explorer. All rights reserved.`;
             }
 
-            // --- Caching Functions ---
-
-            function saveCache() {
-                if (!CACHE_ENABLED) return;
-                try {
-                    // Prune expired items before saving
-                    const now = Date.now();
-                    const prunedCache = {};
-                    for (const key in thumbnailCache) {
-                        if (now - thumbnailCache[key].timestamp < CACHE_DURATION_MS) {
-                            prunedCache[key] = thumbnailCache[key];
-                        }
-                    }
-                    localStorage.setItem('thumbnailCache', JSON.stringify(prunedCache));
-                } catch (e) {
-                    console.warn("Could not save thumbnail cache to localStorage:", e);
-                    // Handle potential storage limits
-                    if (e.name === 'QuotaExceededError') {
-                        console.warn("LocalStorage quota exceeded. Clearing cache.");
-                        localStorage.removeItem('thumbnailCache');
-                        thumbnailCache = {}; // Clear in-memory cache too
-                    }
-                }
+            // --- Cleanup ---
+            function cleanupObjectUrls() {
+                console.log(`Cleaning up ${objectUrls.size} object URLs.`);
+                objectUrls.forEach((url, key) => {
+                    URL.revokeObjectURL(url);
+                });
+                objectUrls.clear();
             }
 
-            function loadCache() {
-                if (!CACHE_ENABLED) return;
-                try {
-                    const cachedData = localStorage.getItem('thumbnailCache');
-                    if (cachedData) {
-                        const parsedCache = JSON.parse(cachedData);
-                        // Validate timestamps and filter out expired items
-                        const now = Date.now();
-                        for (const key in parsedCache) {
-                            if (parsedCache[key] && parsedCache[key].timestamp && (now - parsedCache[key].timestamp < CACHE_DURATION_MS)) {
-                                thumbnailCache[key] = parsedCache[key];
-                            }
-                        }
-                        console.log(`Loaded ${Object.keys(thumbnailCache).length} valid items from cache.`);
-                    }
-                } catch (e) {
-                    console.warn("Could not load thumbnail cache from localStorage:", e);
-                    localStorage.removeItem('thumbnailCache'); // Clear potentially corrupted cache
-                }
-            }
+            // Cleanup URLs when the page is closed/reloaded
+            window.addEventListener('beforeunload', cleanupObjectUrls);
 
         });
     </script>
