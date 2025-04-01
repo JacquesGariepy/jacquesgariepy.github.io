@@ -1,32 +1,46 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Explorateur de Fichiers HTML</title>
+    <title>HTML File Explorer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        /* Apply Inter font globally */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Styling for thumbnail hover effect */
         .thumbnail-container {
             perspective: 1000px;
         }
         .thumbnail {
             transition: all 0.3s ease;
             transform-style: preserve-3d;
+            border-radius: 0.75rem; /* Consistent rounded corners */
         }
         .thumbnail:hover {
             transform: translateY(-5px) rotateX(5deg);
             box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
         }
+        /* Styling for the image container within the thumbnail */
         .thumbnail-img {
             height: 200px;
             object-fit: cover;
-            background-color: #f3f4f6;
+            background-color: #f3f4f6; /* Light gray background */
             display: flex;
             align-items: center;
             justify-content: center;
+            border-top-left-radius: 0.75rem;
+            border-top-right-radius: 0.75rem;
+            overflow: hidden; /* Ensure image stays within rounded corners */
         }
+        /* Loading spinner animation */
         .loading-spinner {
             animation: spin 1s linear infinite;
         }
@@ -34,285 +48,457 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        .iframe-container {
-            width: 100%;
-            height: 200px;
-            border: none;
-            overflow: hidden;
-        }
+        /* Placeholder style for images while loading or on error */
         .screenshot-placeholder {
             background: linear-gradient(135deg, #f3f4f6 25%, #e5e7eb 25%, #e5e7eb 50%, #f3f4f6 50%, #f3f4f6 75%, #e5e7eb 75%);
             background-size: 20px 20px;
+        }
+        /* Ensure all elements have rounded corners */
+        input, .bg-white {
+            border-radius: 0.75rem;
+        }
+        /* Style for the DeepSite footer */
+        .deepsite-footer {
+            border-radius: 8px;
+            text-align: center;
+            font-size: 12px;
+            color: #fff;
+            margin-top: 16px;
+            position: fixed;
+            left: 8px;
+            bottom: 8px;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 4px 8px;
+        }
+        .deepsite-footer img {
+            width: 16px;
+            height: 16px;
+            vertical-align: middle;
+            display: inline-block;
+            margin-right: 3px;
+            filter: brightness(0) invert(1);
+        }
+        .deepsite-footer a {
+            color: #fff;
+            text-decoration: underline;
         }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
     <div class="container mx-auto px-4 py-8">
-        <!-- Header -->
         <header class="mb-12 text-center">
-            <h1 class="text-4xl font-bold text-indigo-700 mb-2">Explorateur HTML</h1>
-            <p class="text-gray-600 max-w-2xl mx-auto">Visualisez toutes les pages HTML de ce répertoire</p>
-            
+            <h1 class="text-4xl font-bold text-indigo-700 mb-2">HTML Explorer</h1>
+            <p class="text-gray-600 max-w-2xl mx-auto">Browse all HTML pages in this directory</p>
+
             <div class="mt-6 flex justify-center">
                 <div class="relative w-full max-w-md">
-                    <input type="text" id="searchInput" placeholder="Rechercher une page..." 
+                    <input type="text" id="searchInput" placeholder="Search for a page..."
                            class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    <i class="fas fa-search absolute right-3 top-3 text-gray-400"></i>
+                    <i class="fas fa-search absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
                 </div>
             </div>
         </header>
 
-        <!-- Main Content -->
         <main>
-            <!-- Stats -->
-            <div class="bg-white rounded-xl shadow-sm p-6 mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="bg-white shadow-sm p-6 mb-8 grid grid-cols-1 md:grid-cols-3 gap-4 rounded-xl">
                 <div class="text-center p-4 border border-gray-100 rounded-lg">
                     <div class="text-indigo-600 mb-2">
                         <i class="fas fa-file-alt text-3xl"></i>
                     </div>
                     <h3 class="text-xl font-semibold text-gray-800" id="totalPages">0</h3>
-                    <p class="text-gray-500">Pages HTML</p>
+                    <p class="text-gray-500">HTML Pages</p>
                 </div>
                 <div class="text-center p-4 border border-gray-100 rounded-lg">
                     <div class="text-green-600 mb-2">
                         <i class="fas fa-calendar-day text-3xl"></i>
                     </div>
-                    <h3 class="text-xl font-semibold text-gray-800" id="lastUpdated">Aujourd'hui</h3>
-                    <p class="text-gray-500">Dernière mise à jour</p>
+                    <h3 class="text-xl font-semibold text-gray-800" id="lastUpdated">Today</h3>
+                    <p class="text-gray-500">Last Updated</p>
                 </div>
                 <div class="text-center p-4 border border-gray-100 rounded-lg">
                     <div class="text-purple-600 mb-2">
                         <i class="fas fa-folder-open text-3xl"></i>
                     </div>
-                    <h3 class="text-xl font-semibold text-gray-800" id="directoryName">Répertoire</h3>
-                    <p class="text-gray-500">Emplacement actuel</p>
+                    <h3 class="text-xl font-semibold text-gray-800" id="directoryName">Directory</h3>
+                    <p class="text-gray-500">Current Location</p>
                 </div>
             </div>
 
-            <!-- Thumbnails Grid -->
             <div id="loading" class="text-center py-12">
                 <div class="inline-block loading-spinner text-indigo-600">
                     <i class="fas fa-spinner text-4xl"></i>
                 </div>
-                <p class="mt-4 text-gray-600">Analyse du répertoire...</p>
+                <p class="mt-4 text-gray-600">Scanning directory...</p>
             </div>
 
             <div id="noResults" class="hidden text-center py-12 bg-white rounded-xl shadow-sm">
-                <i class="fas fa-file-excel text-5xl text-gray-400 mb-4"></i>
-                <h3 class="text-xl font-semibold text-gray-700">Aucun résultat trouvé</h3>
-                <p class="text-gray-500 mt-2">Essayez avec d'autres termes de recherche</p>
+                <i class="fas fa-search text-5xl text-gray-400 mb-4"></i>
+                <h3 class="text-xl font-semibold text-gray-700">No results found</h3>
+                <p class="text-gray-500 mt-2">Try different search terms</p>
             </div>
 
             <div id="thumbnailsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 hidden">
-                <!-- Thumbnails will be inserted here by JavaScript -->
-            </div>
+                </div>
         </main>
 
-        <!-- Footer -->
         <footer class="mt-16 text-center text-gray-500 text-sm">
-            <p>© 2023 Explorateur HTML. Tous droits réservés.</p>
-            <p class="mt-1">Génération de miniatures en temps réel avec html-to-image</p>
+            <p id="copyright">© 2025 HTML Explorer. All rights reserved.</p>
+            <p class="mt-1">Real-time thumbnail generation with html-to-image</p>
         </footer>
     </div>
 
+    <p class="deepsite-footer">Made with <img src="https://enzostvs-deepsite.hf.space/logo.svg" alt="DeepSite Logo"><a href="https://enzostvs-deepsite.hf.space" target="_blank">DeepSite</a> - <a href="https://enzostvs-deepsite.hf.space?remix=jackboy70/files" target="_blank">🧬 Remix</a></p>
+
     <script>
         document.addEventListener('DOMContentLoaded', async function() {
-            // Get current directory path
-            const currentPath = window.location.pathname;
-            const directoryName = currentPath.split('/').filter(Boolean).pop() || 'Racine';
-            document.getElementById('directoryName').textContent = directoryName;
-            
-            try {
-                // Fetch all HTML files in the directory
-                const response = await fetch('./?restype=listing');
-                
-                if (!response.ok) {
-                    throw new Error('Impossible de lire le répertoire');
-                }
-                
-                const html = await response.text();
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(html, 'text/html');
-                const links = Array.from(doc.querySelectorAll('a[href$=".html"]'));
-                
-                const htmlFiles = links.map(link => {
-                    return {
-                        name: link.textContent.replace('.html', ''),
-                        path: link.getAttribute('href'),
-                        lastModified: new Date().toISOString().split('T')[0], // Would normally use file.lastModified
-                        size: 'N/A' // Would normally use file.size
-                    };
-                });
-                
-                // Filter out current page
-                const currentPage = window.location.pathname.split('/').pop();
-                const filteredFiles = htmlFiles.filter(file => file.path !== currentPage);
-                
-                if (filteredFiles.length === 0) {
-                    document.getElementById('loading').innerHTML = `
-                        <i class="fas fa-folder-open text-5xl text-gray-400 mb-4"></i>
-                        <h3 class="text-xl font-semibold text-gray-700">Répertoire vide</h3>
-                        <p class="text-gray-500 mt-2">Aucun fichier HTML trouvé dans ce répertoire</p>
-                    `;
-                    return;
-                }
-                
-                // Update stats
-                document.getElementById('totalPages').textContent = filteredFiles.length;
-                document.getElementById('lastUpdated').textContent = new Date().toLocaleDateString('fr-FR');
-                
-                // Display thumbnails
-                await displayThumbnails(filteredFiles);
-                
-                // Hide loading spinner
-                document.getElementById('loading').classList.add('hidden');
-                document.getElementById('thumbnailsGrid').classList.remove('hidden');
-                
-                // Setup search functionality
-                document.getElementById('searchInput').addEventListener('input', function(e) {
-                    const searchTerm = e.target.value.toLowerCase();
-                    const filterResults = filteredFiles.filter(file => 
-                        file.name.toLowerCase().includes(searchTerm) || 
-                        file.path.toLowerCase().includes(searchTerm)
-                    );
+            // --- Configuration ---
+            const CACHE_ENABLED = true; // Enable/disable thumbnail caching
+            const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // Cache thumbnails for 24 hours
+            const THUMBNAIL_QUALITY = 0.6; // Thumbnail image quality (0.1 to 1.0)
+            const THUMBNAIL_DELAY_MS = 500; // Delay before capturing thumbnail (allows rendering)
+            const PLACEHOLDER_LOADING = 'https://placehold.co/400x300/f3f4f6/cbd5e1?text=Loading...';
+            const PLACEHOLDER_ERROR = 'https://placehold.co/400x300/fecaca/991b1b?text=Thumbnail+Error';
 
-                    if (filterResults.length === 0) {
-                        document.getElementById('thumbnailsGrid').classList.add('hidden');
-                        document.getElementById('noResults').classList.remove('hidden');
-                    } else {
-                        document.getElementById('noResults').classList.add('hidden');
-                        document.getElementById('thumbnailsGrid').classList.remove('hidden');
-                        displayFilteredThumbnails(filterResults);
+            // --- DOM Elements ---
+            const loadingDiv = document.getElementById('loading');
+            const noResultsDiv = document.getElementById('noResults');
+            const grid = document.getElementById('thumbnailsGrid');
+            const searchInput = document.getElementById('searchInput');
+            const totalPagesEl = document.getElementById('totalPages');
+            const lastUpdatedEl = document.getElementById('lastUpdated');
+            const directoryNameEl = document.getElementById('directoryName');
+            const copyrightEl = document.getElementById('copyright');
+
+            // --- State ---
+            let allHtmlFiles = []; // Holds all fetched file data
+            let thumbnailCache = {}; // In-memory cache
+
+            // --- Initialization ---
+            init();
+
+            async function init() {
+                // Update dynamic elements
+                updateCopyrightYear();
+                updateDirectoryName();
+                loadCache();
+
+                try {
+                    // Fetch HTML files from the current directory
+                    // IMPORTANT: This requires server-side support for directory listing
+                    // It might return a standard HTML page or an error if not configured
+                    const response = await fetch('./?restype=listing'); // Standard convention, might vary
+
+                    if (!response.ok) {
+                        if (response.status === 404) {
+                             throw new Error('Directory listing not found or not enabled on this server.');
+                        }
+                        throw new Error(`Failed to fetch directory listing (Status: ${response.status})`);
                     }
-                });
-                
-            } catch (error) {
-                console.error('Error:', error);
-                document.getElementById('loading').innerHTML = `
-                    <i class="fas fa-exclamation-triangle text-5xl text-red-400 mb-4"></i>
-                    <h3 class="text-xl font-semibold text-gray-700">Erreur de chargement</h3>
-                    <p class="text-gray-500 mt-2">${error.message}</p>
-                    <p class="text-sm text-gray-400 mt-4">Cette fonctionnalité nécessite un serveur web.</p>
-                `;
+
+                    const htmlText = await response.text();
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(htmlText, 'text/html');
+
+                    // Find links ending with .html (adjust selector if needed)
+                    const links = Array.from(doc.querySelectorAll('a[href$=".html"]'));
+
+                    // Extract file information
+                    // Note: lastModified and size might not be available from simple listing
+                    const fetchedFiles = links.map(link => {
+                        const href = link.getAttribute('href');
+                        // Basic name extraction, might need refinement
+                        const name = link.textContent.replace('.html', '').trim() || href.replace('.html', '');
+                        return {
+                            name: name,
+                            path: href,
+                            // These are often unavailable via simple HTTP listing
+                            lastModified: 'N/A',
+                            size: 'N/A'
+                        };
+                    });
+
+                    // Filter out the current index page
+                    const currentPage = window.location.pathname.split('/').pop();
+                    allHtmlFiles = fetchedFiles.filter(file => file.path !== currentPage && file.path !== './');
+
+                    if (allHtmlFiles.length === 0) {
+                        showEmptyDirectoryMessage();
+                        return;
+                    }
+
+                    // Update stats
+                    totalPagesEl.textContent = allHtmlFiles.length;
+                    // Use a generic "Today" or fetch server date if possible
+                    lastUpdatedEl.textContent = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+
+                    // Display thumbnails
+                    await displayThumbnails(allHtmlFiles);
+
+                    // Hide loading, show grid
+                    loadingDiv.classList.add('hidden');
+                    grid.classList.remove('hidden');
+
+                    // Setup search functionality
+                    searchInput.addEventListener('input', handleSearch);
+
+                } catch (error) {
+                    console.error('Initialization Error:', error);
+                    showErrorMessage(error.message);
+                }
             }
-            
-            async function displayThumbnails(files) {
-                const grid = document.getElementById('thumbnailsGrid');
-                grid.innerHTML = '';
-                
-                // Create cache for thumbnails
-                const thumbnailCache = JSON.parse(localStorage.getItem('thumbnailCache') || '{}');
-                
+
+            // --- Core Functions ---
+
+            function handleSearch(e) {
+                const searchTerm = e.target.value.toLowerCase().trim();
+                const filteredFiles = allHtmlFiles.filter(file =>
+                    file.name.toLowerCase().includes(searchTerm) ||
+                    file.path.toLowerCase().includes(searchTerm)
+                );
+
+                if (filteredFiles.length === 0 && searchTerm) {
+                    grid.classList.add('hidden');
+                    noResultsDiv.classList.remove('hidden');
+                } else {
+                    noResultsDiv.classList.add('hidden');
+                    grid.classList.remove('hidden');
+                    // Re-display thumbnails for the filtered set
+                    displayThumbnails(filteredFiles, true); // Pass true to indicate filtering
+                }
+            }
+
+            async function displayThumbnails(files, isFiltering = false) {
+                grid.innerHTML = ''; // Clear existing thumbnails
+
+                // Use Promise.all for potentially faster rendering, especially when cached
+                const thumbnailPromises = files.map(file => createThumbnailElement(file));
+                await Promise.all(thumbnailPromises);
+
+                 // Only trigger generation if not just filtering based on existing cache
+                if (!isFiltering) {
+                    triggerThumbnailGeneration(files);
+                }
+            }
+
+            async function createThumbnailElement(file) {
+                const thumbnailId = `thumb-${file.path.replace(/[^a-z0-9]/gi, '-')}`;
+                const cacheKey = `thumb-${file.path}`;
+                const cachedItem = thumbnailCache[cacheKey];
+                let imageSrc = PLACEHOLDER_LOADING;
+
+                // Use cached image if valid
+                if (CACHE_ENABLED && cachedItem && (Date.now() - cachedItem.timestamp < CACHE_DURATION_MS)) {
+                    imageSrc = cachedItem.dataUrl;
+                }
+
+                const thumbnailContainer = document.createElement('div');
+                thumbnailContainer.className = 'thumbnail-container';
+                thumbnailContainer.innerHTML = `
+                    <div id="${thumbnailId}" class="thumbnail bg-white overflow-hidden shadow-md hover:shadow-lg border border-gray-100">
+                        <a href="${file.path}" target="_blank" class="block">
+                            <div class="thumbnail-img">
+                                <img src="${imageSrc}" alt="Thumbnail for ${file.name}" class="w-full h-full object-cover" loading="lazy" onerror="this.src='${PLACEHOLDER_ERROR}';">
+                            </div>
+                            <div class="p-4">
+                                <h3 class="font-semibold text-lg text-gray-800 mb-1 truncate" title="${file.name}">${file.name}</h3>
+                                <div class="flex justify-between text-sm text-gray-500 mt-2">
+                                    <span class="truncate" title="${file.path}"><i class="fas fa-link mr-1"></i> ${file.path}</span>
+                                    </div>
+                            </div>
+                        </a>
+                    </div>
+                `;
+                grid.appendChild(thumbnailContainer);
+            }
+
+             async function triggerThumbnailGeneration(files) {
                 for (const file of files) {
-                    const thumbnailId = `thumbnail-${file.path.replace(/[^a-z0-9]/gi, '-')}`;
-                    const cacheKey = `thumbnail-${file.path}`;
-                    
-                    // Check cache first
-                    if (thumbnailCache[cacheKey]) {
-                        createThumbnailElement(file, thumbnailCache[cacheKey]);
-                        continue;
+                    const cacheKey = `thumb-${file.path}`;
+                    const cachedItem = thumbnailCache[cacheKey];
+
+                    // Generate only if not cached or cache expired
+                    if (!CACHE_ENABLED || !cachedItem || (Date.now() - cachedItem.timestamp >= CACHE_DURATION_MS)) {
+                         // Add a small delay between iframe creations to avoid overwhelming the browser
+                        await new Promise(resolve => setTimeout(resolve, 50));
+                        generateAndCacheThumbnail(file);
                     }
-                    
-                    // Create temporary iframe to capture screenshot
-                    const iframe = document.createElement('iframe');
-                    iframe.className = 'hidden';
-                    iframe.src = file.path;
-                    iframe.onload = async function() {
-                        try {
-                            // Wait for content to load
-                            await new Promise(resolve => setTimeout(resolve, 1000));
-                            
-                            // Capture screenshot
-                            const dataUrl = await htmlToImage.toPng(iframe.contentDocument.body, {
-                                quality: 0.5,
-                                backgroundColor: '#ffffff',
-                                filter: (node) => {
-                                    // Skip script and style tags
-                                    return !['SCRIPT', 'STYLE', 'IFRAME'].includes(node.tagName);
-                                }
-                            });
-                            
-                            // Cache the thumbnail
-                            thumbnailCache[cacheKey] = dataUrl;
-                            localStorage.setItem('thumbnailCache', JSON.stringify(thumbnailCache));
-                            
-                            // Update the thumbnail
-                            const thumbnailElement = document.getElementById(thumbnailId);
-                            if (thumbnailElement) {
-                                thumbnailElement.querySelector('img').src = dataUrl;
+                }
+            }
+
+            async function generateAndCacheThumbnail(file) {
+                const thumbnailId = `thumb-${file.path.replace(/[^a-z0-9]/gi, '-')}`;
+                const cacheKey = `thumb-${file.path}`;
+                const thumbnailElement = document.getElementById(thumbnailId);
+                const imgElement = thumbnailElement?.querySelector('img');
+
+                // Create an iframe off-screen
+                const iframe = document.createElement('iframe');
+                iframe.style.position = 'absolute';
+                iframe.style.width = '800px'; // Larger iframe for better capture
+                iframe.style.height = '600px';
+                iframe.style.left = '-9999px'; // Move off-screen
+                iframe.style.top = '-9999px';
+                iframe.sandbox = 'allow-scripts allow-same-origin'; // Sandbox for security, adjust if needed
+                iframe.src = file.path;
+
+                let iframeLoadTimeout;
+
+                iframe.onload = async () => {
+                    clearTimeout(iframeLoadTimeout); // Clear timeout on successful load
+                    try {
+                        // Wait for content to potentially render after load event
+                        await new Promise(resolve => setTimeout(resolve, THUMBNAIL_DELAY_MS));
+
+                        if (!iframe.contentDocument || !iframe.contentDocument.body) {
+                            throw new Error("Iframe content is not accessible.");
+                        }
+
+                         // Use html-to-image to capture the iframe body
+                        const dataUrl = await htmlToImage.toJpeg(iframe.contentDocument.body, {
+                            quality: THUMBNAIL_QUALITY,
+                            backgroundColor: '#ffffff',
+                            width: 800, // Match iframe width
+                            height: 600, // Match iframe height
+                            // Filter out scripts, styles, and potentially problematic elements
+                            filter: (node) => {
+                                const nodeName = node.tagName?.toUpperCase();
+                                return nodeName !== 'SCRIPT' && nodeName !== 'STYLE' && nodeName !== 'IFRAME';
                             }
-                            
-                        } catch (err) {
-                            console.error(`Error generating thumbnail for ${file.path}:`, err);
-                            const thumbnailElement = document.getElementById(thumbnailId);
-                            if (thumbnailElement) {
-                                thumbnailElement.querySelector('img').src = 'https://via.placeholder.com/400x300/f3f4f6/6b7280?text=Erreur+de+miniature';
+                        });
+
+                        // Update the thumbnail image source
+                        if (imgElement) {
+                            imgElement.src = dataUrl;
+                            imgElement.onerror = () => { imgElement.src = PLACEHOLDER_ERROR; }; // Reset onerror
+                        }
+
+                        // Cache the result
+                        if (CACHE_ENABLED) {
+                            thumbnailCache[cacheKey] = { dataUrl: dataUrl, timestamp: Date.now() };
+                            saveCache();
+                        }
+
+                    } catch (err) {
+                        console.error(`Error generating thumbnail for ${file.path}:`, err);
+                        if (imgElement) {
+                            imgElement.src = PLACEHOLDER_ERROR;
+                        }
+                        // Optionally cache the error state to avoid retrying immediately
+                        // cacheThumbnail(cacheKey, PLACEHOLDER_ERROR);
+                    } finally {
+                        // Clean up the iframe
+                        document.body.removeChild(iframe);
+                    }
+                };
+
+                iframe.onerror = (err) => {
+                     clearTimeout(iframeLoadTimeout);
+                    console.error(`Error loading iframe for ${file.path}:`, err);
+                     if (imgElement) {
+                        imgElement.src = PLACEHOLDER_ERROR;
+                    }
+                    document.body.removeChild(iframe);
+                };
+
+                // Add a timeout in case iframe loading hangs
+                iframeLoadTimeout = setTimeout(() => {
+                    console.warn(`Timeout loading iframe for ${file.path}`);
+                    if (imgElement) {
+                        imgElement.src = PLACEHOLDER_ERROR; // Indicate timeout/error
+                    }
+                     if (document.body.contains(iframe)) {
+                        document.body.removeChild(iframe);
+                    }
+                }, 15000); // 15 second timeout
+
+
+                document.body.appendChild(iframe);
+            }
+
+
+            // --- UI Update Functions ---
+
+            function showEmptyDirectoryMessage() {
+                loadingDiv.innerHTML = `
+                    <i class="fas fa-folder-open text-5xl text-gray-400 mb-4"></i>
+                    <h3 class="text-xl font-semibold text-gray-700">Directory Empty</h3>
+                    <p class="text-gray-500 mt-2">No HTML files found in this directory.</p>
+                `;
+                loadingDiv.classList.remove('hidden');
+                grid.classList.add('hidden');
+            }
+
+            function showErrorMessage(message) {
+                loadingDiv.innerHTML = `
+                    <i class="fas fa-exclamation-triangle text-5xl text-red-400 mb-4"></i>
+                    <h3 class="text-xl font-semibold text-gray-700">Loading Error</h3>
+                    <p class="text-gray-500 mt-2">${message}</p>
+                    <p class="text-sm text-gray-400 mt-4">Check browser console for details. Directory listing might require specific server configuration.</p>
+                `;
+                 loadingDiv.classList.remove('hidden');
+                 grid.classList.add('hidden');
+            }
+
+            function updateDirectoryName() {
+                // Attempt to get a more user-friendly directory name
+                const pathParts = window.location.pathname.split('/').filter(Boolean);
+                const currentDir = pathParts.pop() || 'Root'; // Use 'Root' if it's the base directory
+                directoryNameEl.textContent = currentDir;
+            }
+
+            function updateCopyrightYear() {
+                const currentYear = new Date().getFullYear();
+                copyrightEl.textContent = `© ${currentYear} HTML Explorer. All rights reserved.`;
+            }
+
+            // --- Caching Functions ---
+
+            function saveCache() {
+                if (!CACHE_ENABLED) return;
+                try {
+                    // Prune expired items before saving
+                    const now = Date.now();
+                    const prunedCache = {};
+                    for (const key in thumbnailCache) {
+                        if (now - thumbnailCache[key].timestamp < CACHE_DURATION_MS) {
+                            prunedCache[key] = thumbnailCache[key];
+                        }
+                    }
+                    localStorage.setItem('thumbnailCache', JSON.stringify(prunedCache));
+                } catch (e) {
+                    console.warn("Could not save thumbnail cache to localStorage:", e);
+                    // Handle potential storage limits
+                    if (e.name === 'QuotaExceededError') {
+                        console.warn("LocalStorage quota exceeded. Clearing cache.");
+                        localStorage.removeItem('thumbnailCache');
+                        thumbnailCache = {}; // Clear in-memory cache too
+                    }
+                }
+            }
+
+            function loadCache() {
+                if (!CACHE_ENABLED) return;
+                try {
+                    const cachedData = localStorage.getItem('thumbnailCache');
+                    if (cachedData) {
+                        const parsedCache = JSON.parse(cachedData);
+                        // Validate timestamps and filter out expired items
+                        const now = Date.now();
+                        for (const key in parsedCache) {
+                            if (parsedCache[key] && parsedCache[key].timestamp && (now - parsedCache[key].timestamp < CACHE_DURATION_MS)) {
+                                thumbnailCache[key] = parsedCache[key];
                             }
                         }
-                        
-                        // Remove iframe after capture
-                        iframe.remove();
-                    };
-                    
-                    document.body.appendChild(iframe);
-                    createThumbnailElement(file, 'https://via.placeholder.com/400x300/f3f4f6/6b7280?text=Chargement...', thumbnailId);
-                }
-                
-                function createThumbnailElement(file, imageSrc, id = '') {
-                    const thumbnail = document.createElement('div');
-                    thumbnail.className = 'thumbnail-container';
-                    thumbnail.innerHTML = `
-                        <div id="${id}" class="thumbnail bg-white rounded-xl overflow-hidden shadow-md hover:shadow-lg border border-gray-100">
-                            <a href="${file.path}" class="block">
-                                <div class="thumbnail-img">
-                                    <img src="${imageSrc}" alt="${file.name}" class="w-full h-full object-cover" loading="lazy">
-                                </div>
-                                <div class="p-4">
-                                    <h3 class="font-semibold text-lg text-gray-800 mb-1 truncate">${file.name}</h3>
-                                    <div class="flex justify-between text-sm text-gray-500">
-                                        <span><i class="far fa-calendar-alt mr-1"></i> ${file.lastModified}</span>
-                                        <span><i class="fas fa-file-code mr-1"></i> ${file.size}</span>
-                                    </div>
-                                </div>
-                            </a>
-                        </div>
-                    `;
-                    grid.appendChild(thumbnail);
+                        console.log(`Loaded ${Object.keys(thumbnailCache).length} valid items from cache.`);
+                    }
+                } catch (e) {
+                    console.warn("Could not load thumbnail cache from localStorage:", e);
+                    localStorage.removeItem('thumbnailCache'); // Clear potentially corrupted cache
                 }
             }
-            
-            function displayFilteredThumbnails(files) {
-                const grid = document.getElementById('thumbnailsGrid');
-                grid.innerHTML = '';
-                
-                const thumbnailCache = JSON.parse(localStorage.getItem('thumbnailCache') || '{}');
-                
-                files.forEach(file => {
-                    const cacheKey = `thumbnail-${file.path}`;
-                    const cachedThumbnail = thumbnailCache[cacheKey] || 'https://via.placeholder.com/400x300/f3f4f6/6b7280?text=Chargement...';
-                    
-                    const thumbnail = document.createElement('div');
-                    thumbnail.className = 'thumbnail-container';
-                    thumbnail.innerHTML = `
-                        <div class="thumbnail bg-white rounded-xl overflow-hidden shadow-md hover:shadow-lg border border-gray-100">
-                            <a href="${file.path}" class="block">
-                                <div class="thumbnail-img">
-                                    <img src="${cachedThumbnail}" alt="${file.name}" class="w-full h-full object-cover" loading="lazy">
-                                </div>
-                                <div class="p-4">
-                                    <h3 class="font-semibold text-lg text-gray-800 mb-1 truncate">${file.name}</h3>
-                                    <div class="flex justify-between text-sm text-gray-500">
-                                        <span><i class="far fa-calendar-alt mr-1"></i> ${file.lastModified}</span>
-                                        <span><i class="fas fa-file-code mr-1"></i> ${file.size}</span>
-                                    </div>
-                                </div>
-                            </a>
-                        </div>
-                    `;
-                    grid.appendChild(thumbnail);
-                });
-            }
+
         });
     </script>
-<p style="border-radius: 8px; text-align: center; font-size: 12px; color: #fff; margin-top: 16px;position: fixed; left: 8px; bottom: 8px; z-index: 10; background: rgba(0, 0, 0, 0.8); padding: 4px 8px;">Made with <img src="https://enzostvs-deepsite.hf.space/logo.svg" alt="DeepSite Logo" style="width: 16px; height: 16px; vertical-align: middle;display:inline-block;margin-right:3px;filter:brightness(0) invert(1);"><a href="https://enzostvs-deepsite.hf.space" style="color: #fff;text-decoration: underline;" target="_blank" >DeepSite</a> - <a href="https://enzostvs-deepsite.hf.space?remix=jackboy70/files" style="color: #fff;text-decoration: underline;" target="_blank" >🧬 Remix</a></p></body>
+</body>
 </html>
